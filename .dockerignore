@@ -1,0 +1,10 @@
+node_modules
+output
+.env
+.ai-config.json
+.git
+.cursor
+*.md
+Dockerfile
+docker-compose.yml
+.dockerignore

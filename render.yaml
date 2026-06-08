@@ -1,0 +1,43 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Deploy: connect GitHub repo → New Blueprint → select render.yaml
+# Set secrets in Render dashboard (sync: false vars).
+
+services:
+  - type: web
+    name: shipmozo-dev-helper
+    runtime: docker
+    plan: standard
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: HEADLESS
+        value: "true"
+      - key: PYTHON_BIN
+        value: python3
+      - key: IMAGE_STORAGE
+        value: cloudinary
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: AI_PROVIDER
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: SHIPMOZO_EMAIL
+        sync: false
+      - key: SHIPMOZO_PASSWORD
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false

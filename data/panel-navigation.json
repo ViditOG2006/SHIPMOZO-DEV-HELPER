@@ -1,0 +1,565 @@
+{
+  "version": 1,
+  "baseUrl": "https://panel.appiify.com",
+  "source": "merged",
+  "discoveredAt": "2026-06-05T10:10:42.698392+00:00",
+  "crawledUrls": 56,
+  "pageCount": 56,
+  "pages": [
+    {
+      "text": "Analytics",
+      "href": "https://panel.appiify.com/",
+      "path": "/",
+      "keywords": [
+        "analytics"
+      ]
+    },
+    {
+      "text": "Billing",
+      "href": "https://panel.appiify.com/billing",
+      "path": "/billing",
+      "keywords": [
+        "billing",
+        "invoice",
+        "payment"
+      ]
+    },
+    {
+      "text": "All Recharges",
+      "href": "https://panel.appiify.com/billing/all-recharges",
+      "path": "/billing/all-recharges",
+      "keywords": [
+        "all",
+        "billing",
+        "recharge",
+        "recharges",
+        "wallet"
+      ]
+    },
+    {
+      "text": "COD Remittance",
+      "href": "https://panel.appiify.com/billing/cod-remittance",
+      "path": "/billing/cod-remittance",
+      "keywords": [
+        "billing",
+        "cod",
+        "remittance"
+      ]
+    },
+    {
+      "text": "Credit Notes",
+      "href": "https://panel.appiify.com/billing/credit-notes",
+      "path": "/billing/credit-notes",
+      "keywords": [
+        "billing",
+        "credit",
+        "notes"
+      ]
+    },
+    {
+      "text": "Invoices",
+      "href": "https://panel.appiify.com/billing/invoices",
+      "path": "/billing/invoices",
+      "keywords": [
+        "billing",
+        "invoices"
+      ]
+    },
+    {
+      "text": "Ledgers",
+      "href": "https://panel.appiify.com/billing/ledgers",
+      "path": "/billing/ledgers",
+      "keywords": [
+        "billing",
+        "ledgers"
+      ]
+    },
+    {
+      "text": "Notification Credit History",
+      "href": "https://panel.appiify.com/billing/notification-credit-history",
+      "path": "/billing/notification-credit-history",
+      "keywords": [
+        "billing",
+        "credit",
+        "history",
+        "notification"
+      ]
+    },
+    {
+      "text": "Billing Passbook",
+      "href": "https://panel.appiify.com/billing/passbook",
+      "path": "/billing/passbook",
+      "keywords": [
+        "billing",
+        "passbook",
+        "wallet"
+      ]
+    },
+    {
+      "text": "Shipping Charges",
+      "href": "https://panel.appiify.com/billing/shipping-charges",
+      "path": "/billing/shipping-charges",
+      "keywords": [
+        "billing",
+        "charges",
+        "shipping"
+      ]
+    },
+    {
+      "text": "Catalog",
+      "href": "https://panel.appiify.com/catalog",
+      "path": "/catalog",
+      "keywords": [
+        "catalog",
+        "product"
+      ]
+    },
+    {
+      "text": "Channels",
+      "href": "https://panel.appiify.com/channels",
+      "path": "/channels",
+      "keywords": [
+        "channel",
+        "channels"
+      ]
+    },
+    {
+      "text": "Shopify",
+      "href": "https://panel.appiify.com/channels/shopify",
+      "path": "/channels/shopify",
+      "keywords": [
+        "channels",
+        "shopify",
+        "store"
+      ]
+    },
+    {
+      "text": "WooCommerce",
+      "href": "https://panel.appiify.com/channels/woocommerce",
+      "path": "/channels/woocommerce",
+      "keywords": [
+        "channels",
+        "woocommerce"
+      ]
+    },
+    {
+      "text": "Dashboard",
+      "href": "https://panel.appiify.com/dashboard",
+      "path": "/dashboard",
+      "keywords": [
+        "analytics",
+        "dashboard",
+        "home"
+      ]
+    },
+    {
+      "text": "Order Status",
+      "href": "https://panel.appiify.com/dashboard/order-status",
+      "path": "/dashboard/order-status",
+      "keywords": [
+        "dashboard",
+        "order",
+        "status"
+      ]
+    },
+    {
+      "text": "Finance",
+      "href": "https://panel.appiify.com/finance",
+      "path": "/finance",
+      "keywords": [
+        "billing",
+        "finance"
+      ]
+    },
+    {
+      "text": "Integrations",
+      "href": "https://panel.appiify.com/integrations",
+      "path": "/integrations",
+      "keywords": [
+        "integration",
+        "integrations"
+      ]
+    },
+    {
+      "text": "NDR",
+      "href": "https://panel.appiify.com/ndr",
+      "path": "/ndr",
+      "keywords": [
+        "delivery",
+        "ndr",
+        "non"
+      ]
+    },
+    {
+      "text": "Add Order",
+      "href": "https://panel.appiify.com/orders/add?type=DOM",
+      "path": "/orders/add",
+      "keywords": [
+        "add",
+        "create",
+        "dom",
+        "order",
+        "orders",
+        "type"
+      ]
+    },
+    {
+      "text": "Add Order",
+      "href": "https://panel.appiify.com/orders/add",
+      "path": "/orders/add",
+      "keywords": [
+        "add",
+        "create",
+        "order",
+        "orders"
+      ]
+    },
+    {
+      "text": "All Orders",
+      "href": "https://panel.appiify.com/orders/all",
+      "path": "/orders/all",
+      "keywords": [
+        "all",
+        "orders"
+      ]
+    },
+    {
+      "text": "Archive Orders",
+      "href": "https://panel.appiify.com/orders/archive",
+      "path": "/orders/archive",
+      "keywords": [
+        "archive",
+        "orders"
+      ]
+    },
+    {
+      "text": "Courier Assigned",
+      "href": "https://panel.appiify.com/orders/courier-assigned",
+      "path": "/orders/courier-assigned",
+      "keywords": [
+        "assigned",
+        "courier",
+        "orders"
+      ]
+    },
+    {
+      "text": "Delivered",
+      "href": "https://panel.appiify.com/orders/delivered",
+      "path": "/orders/delivered",
+      "keywords": [
+        "delivered",
+        "orders"
+      ]
+    },
+    {
+      "text": "In Transit",
+      "href": "https://panel.appiify.com/orders/in-transit",
+      "path": "/orders/in-transit",
+      "keywords": [
+        "orders",
+        "transit"
+      ]
+    },
+    {
+      "text": "Manifests",
+      "href": "https://panel.appiify.com/orders/manifest",
+      "path": "/orders/manifest",
+      "keywords": [
+        "manifest",
+        "manifests",
+        "orders"
+      ]
+    },
+    {
+      "text": "NDR Orders",
+      "href": "https://panel.appiify.com/orders/ndr",
+      "path": "/orders/ndr",
+      "keywords": [
+        "ndr",
+        "orders"
+      ]
+    },
+    {
+      "text": "New Orders",
+      "href": "https://panel.appiify.com/orders/new",
+      "path": "/orders/new",
+      "keywords": [
+        "new",
+        "order",
+        "orders"
+      ]
+    },
+    {
+      "text": "Out For Delivery",
+      "href": "https://panel.appiify.com/orders/out-for-delivery",
+      "path": "/orders/out-for-delivery",
+      "keywords": [
+        "delivery",
+        "for",
+        "orders",
+        "out"
+      ]
+    },
+    {
+      "text": "Pickups & Manifests",
+      "href": "https://panel.appiify.com/orders/pickup",
+      "path": "/orders/pickup",
+      "keywords": [
+        "manifest",
+        "manifests",
+        "orders",
+        "pickup",
+        "pickups"
+      ]
+    },
+    {
+      "text": "Quick Add",
+      "href": "https://panel.appiify.com/orders/quick-add",
+      "path": "/orders/quick-add",
+      "keywords": [
+        "add",
+        "create",
+        "order",
+        "orders",
+        "quick"
+      ]
+    },
+    {
+      "text": "All Returns",
+      "href": "https://panel.appiify.com/orders/returns/all",
+      "path": "/orders/returns/all",
+      "keywords": [
+        "all",
+        "orders",
+        "returns"
+      ]
+    },
+    {
+      "text": "Returns In Transit",
+      "href": "https://panel.appiify.com/orders/returns/in-transit",
+      "path": "/orders/returns/in-transit",
+      "keywords": [
+        "orders",
+        "returns",
+        "transit"
+      ]
+    },
+    {
+      "text": "New Returns",
+      "href": "https://panel.appiify.com/orders/returns/new",
+      "path": "/orders/returns/new",
+      "keywords": [
+        "new",
+        "orders",
+        "returns"
+      ]
+    },
+    {
+      "text": "Pick-up Scheduled",
+      "href": "https://panel.appiify.com/orders/returns/pick-up-scheduled",
+      "path": "/orders/returns/pick-up-scheduled",
+      "keywords": [
+        "orders",
+        "pick",
+        "returns",
+        "scheduled"
+      ]
+    },
+    {
+      "text": "Refunds",
+      "href": "https://panel.appiify.com/orders/returns/refunds",
+      "path": "/orders/returns/refunds",
+      "keywords": [
+        "orders",
+        "refunds",
+        "returns"
+      ]
+    },
+    {
+      "text": "Return Accepted",
+      "href": "https://panel.appiify.com/orders/returns/return-accepted",
+      "path": "/orders/returns/return-accepted",
+      "keywords": [
+        "accepted",
+        "orders",
+        "return",
+        "returns"
+      ]
+    },
+    {
+      "text": "Reverse",
+      "href": "https://panel.appiify.com/orders/reverse",
+      "path": "/orders/reverse",
+      "keywords": [
+        "orders",
+        "return",
+        "reverse"
+      ]
+    },
+    {
+      "text": "RTO In Transit",
+      "href": "https://panel.appiify.com/orders/rto",
+      "path": "/orders/rto",
+      "keywords": [
+        "orders",
+        "rto",
+        "transit"
+      ]
+    },
+    {
+      "text": "RTO Delivered",
+      "href": "https://panel.appiify.com/orders/rto-delivered",
+      "path": "/orders/rto-delivered",
+      "keywords": [
+        "delivered",
+        "orders",
+        "rto"
+      ]
+    },
+    {
+      "text": "Scheduled Orders",
+      "href": "https://panel.appiify.com/orders/scheduled",
+      "path": "/orders/scheduled",
+      "keywords": [
+        "orders",
+        "scheduled"
+      ]
+    },
+    {
+      "text": "Profile",
+      "href": "https://panel.appiify.com/profile",
+      "path": "/profile",
+      "keywords": [
+        "profile"
+      ]
+    },
+    {
+      "text": "Reports",
+      "href": "https://panel.appiify.com/reports",
+      "path": "/reports",
+      "keywords": [
+        "analytics",
+        "reports"
+      ]
+    },
+    {
+      "text": "Add Return",
+      "href": "https://panel.appiify.com/returns/add",
+      "path": "/returns/add",
+      "keywords": [
+        "add",
+        "return",
+        "returns"
+      ]
+    },
+    {
+      "text": "Settings",
+      "href": "https://panel.appiify.com/settings",
+      "path": "/settings",
+      "keywords": [
+        "account",
+        "profile",
+        "settings"
+      ]
+    },
+    {
+      "text": "Shipping Notifications",
+      "href": "https://panel.appiify.com/settings/shipping-notification",
+      "path": "/settings/shipping-notification",
+      "keywords": [
+        "notification",
+        "notifications",
+        "settings",
+        "shipping"
+      ]
+    },
+    {
+      "text": "NDR Shipments",
+      "href": "https://panel.appiify.com/shipments/ndr",
+      "path": "/shipments/ndr",
+      "keywords": [
+        "ndr",
+        "shipments"
+      ]
+    },
+    {
+      "text": "NDR Delivered",
+      "href": "https://panel.appiify.com/shipments/ndr-delivered",
+      "path": "/shipments/ndr-delivered",
+      "keywords": [
+        "delivered",
+        "ndr",
+        "shipments"
+      ]
+    },
+    {
+      "text": "NDR Wrong Address/Phone",
+      "href": "https://panel.appiify.com/shipments/ndr-wrong-info",
+      "path": "/shipments/ndr-wrong-info",
+      "keywords": [
+        "address",
+        "info",
+        "ndr",
+        "phone",
+        "shipments",
+        "wrong"
+      ]
+    },
+    {
+      "text": "RTO Shipments",
+      "href": "https://panel.appiify.com/shipments/rto",
+      "path": "/shipments/rto",
+      "keywords": [
+        "rto",
+        "shipments"
+      ]
+    },
+    {
+      "text": "RTO Delivered",
+      "href": "https://panel.appiify.com/shipments/rto-delivered",
+      "path": "/shipments/rto-delivered",
+      "keywords": [
+        "delivered",
+        "rto",
+        "shipments"
+      ]
+    },
+    {
+      "text": "Tickets",
+      "href": "https://panel.appiify.com/tickets",
+      "path": "/tickets",
+      "keywords": [
+        "support",
+        "tickets"
+      ]
+    },
+    {
+      "text": "Wallet",
+      "href": "https://panel.appiify.com/wallet",
+      "path": "/wallet",
+      "keywords": [
+        "balance",
+        "recharge",
+        "wallet"
+      ]
+    },
+    {
+      "text": "Warehouse",
+      "href": "https://panel.appiify.com/warehouse",
+      "path": "/warehouse",
+      "keywords": [
+        "inventory",
+        "warehouse"
+      ]
+    },
+    {
+      "text": "Add Warehouse",
+      "href": "https://panel.appiify.com/warehouse/add",
+      "path": "/warehouse/add",
+      "keywords": [
+        "add",
+        "warehouse"
+      ]
+    }
+  ]
+}

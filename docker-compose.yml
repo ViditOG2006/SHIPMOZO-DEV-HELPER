@@ -1,0 +1,24 @@
+services:
+  dev-helper:
+    build: .
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      HEADLESS: "true"
+      PYTHON_BIN: python3
+      # Set to your public URL when deployed (required for Cloudinary/local image links)
+      # PUBLIC_BASE_URL: https://your-domain.example
+    volumes:
+      - dev-helper-output:/app/output
+      - dev-helper-data:/app/data
+    restart: unless-stopped
+    shm_size: "1gb"
+
+volumes:
+  dev-helper-output:
+  dev-helper-data:

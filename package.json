@@ -1,0 +1,20 @@
+{
+  "name": "shipmozo-dev-helper",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "docs:heal": "node scripts/run_doc_self_heal.js",
+    "discover-nav": "python discover_panel_navigation.py",
+    "clean-nav": "python scripts/clean_panel_navigation.py"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}
