@@ -1,0 +1,313 @@
+{
+  "version": 1,
+  "updatedAt": "2026-06-15T12:00:00.000Z",
+  "description": "Known Shipmozo panel issues — always injected into OpenRouter self-heal and test-generation prompts.",
+  "lessons": [
+    {
+      "id": "nav-manage-courier-404",
+      "tags": ["navigation", "rate-calculator", "e2e", "critical"],
+      "module": "Rate Calculator",
+      "issue": "Navigating to /courier/manage-courier lands on a 404 page ('Opps!!! THE PAGE YOU ARE LOOKING FOR COULD NOT BE FOUND') on many tenants.",
+      "fix": "NEVER use manage-courier URL or sidebar links to it. Use Ctrl+B → Quick Search → type 'rate calculator' → click 'Tools → Rate Calculator'. Reject any script step that opens manage-courier.",
+      "source": "user-report"
+    },
+    {
+      "id": "nav-quick-search-primary",
+      "tags": ["navigation", "rate-calculator"],
+      "module": "Rate Calculator",
+      "issue": "Sidebar href guessing and direct URL fallbacks are slow and often wrong; dashboard waits ~100s on fallback strategies.",
+      "fix": "Primary navigation is always Ctrl+B (Quick Search Pages). Keep navSteps to 4–10 ops, under 20s. Do not loop through many goto URLs after login.",
+      "source": "user-report"
+    },
+    {
+      "id": "verify-no-false-pass-404",
+      "tags": ["verification", "e2e", "critical"],
+      "issue": "Tests were marked passed while browser showed 404 at manage-courier because URL changed but page content was wrong; 'Opps' typo was not detected.",
+      "fix": "verifyTexts MUST include 'pincode' and 'calculate'. Treat is404/isBrokenRoute in observation as hard fail. Never assume success from URL alone. Detect 'opps', 'could not be found', 'go back home'.",
+      "source": "user-report"
+    },
+    {
+      "id": "typing-wrong-field-orders-date",
+      "tags": ["orders", "navigation", "automation"],
+      "module": "New Orders",
+      "issue": "Automation typing (Quick Search / fill_placeholder) hit the New Orders date filter instead, setting dates like 10-06-2026 so newly created test orders are invisible.",
+      "fix": "NEVER fill_placeholder on date/from/to fields. Only fill when Quick Search dialog is open (placeholder contains 'Quick Search'). On orders/new, clear date range filters before searching. After order create, reset filters then search by referenceId.",
+      "source": "user-report"
+    },
+    {
+      "id": "typing-garbage-alert-banner",
+      "tags": ["automation", "navigation"],
+      "issue": "Keyboard input leaked into a global alert/search bar showing garbage text (qwertyuiop…).",
+      "fix": "Call dismiss_overlays first. Confirm target input is visible before fill/type. Do not press keys when focus is unknown. Skip fill if placeholder not found or not visible.",
+      "source": "user-report"
+    },
+    {
+      "id": "orders-chat-not-create",
+      "tags": ["orders", "e2e", "testing"],
+      "module": "New Orders",
+      "issue": "Order test cases without e2eFlow only run AI chat ('how to create order') — no real order is created in the panel.",
+      "fix": "To create real orders in Run UI use inputs.e2eFlow: 'order_create_domestic' with formData.referenceId. Verify on Forward > Domestic > New with filters reset.",
+      "source": "user-report"
+    },
+    {
+      "id": "quick-search-skip-manage-courier",
+      "tags": ["navigation", "rate-calculator"],
+      "issue": "Quick Search results can include 'Manage Courier' which redirects to the 404 trap.",
+      "fix": "When clicking search results, skip items containing 'Manage Courier' unless they also mention Rate Calculator. Prefer breadcrumb 'Tools → Rate Calculator'.",
+      "source": "user-report"
+    },
+    {
+      "id": "stale-nav-cache",
+      "tags": ["navigation", "cache"],
+      "issue": "Cached e2e-nav-rate-calculator.json with manage-courier or broken pageUrl replays bad navigation on next run.",
+      "fix": "Invalidate cache when script contains manage-courier. Re-heal with observe→repair loop instead of replaying stale scripts.",
+      "source": "user-report"
+    },
+    {
+      "id": "agent-iterative-heal",
+      "tags": ["self-heal", "openrouter", "critical"],
+      "issue": "One-shot OpenRouter nav scripts fail when Run UI starts from different page states (dashboard vs 404 vs already on module). User wants agentic self-heal like a coding agent, not a single LLM call.",
+      "fix": "On Run in UI: loop observe → plan → execute navSteps → repair until Rate Calculator verifies. Read live observation JSON every attempt, prior failures, test-run manifest, and console/step logs. Never repeat a failed approach; adapt to CURRENT page only.",
+      "source": "user-report"
+    },
+    {
+      "id": "heal-nav-scripts-only",
+      "tags": ["self-heal", "e2e", "critical"],
+      "issue": "OpenRouter was invoked during every test step or full scenario execution — slow, expensive, and wrong separation of concerns.",
+      "fix": "OpenRouter ONLY writes/repairs navScripts (Ctrl+B navigation to the module). After nav heals, Playwright runs e2eFlow scripts deterministically with NO further AI calls during test steps.",
+      "source": "user-report"
+    },
+    {
+      "id": "openrouter-heal-run-context",
+      "tags": ["self-heal", "openrouter"],
+      "issue": "Self-heal lacked test-run context (which scenarios, prior attempt errors, step logs) so OpenRouter could not diagnose redirects or false passes.",
+      "fix": "Always include in heal prompts: dataset title, scenario manifest (id/title/e2eFlow/expected UI), prior attempt history, stepsRun log lines, and browser console errors when available. Use these to fix nav — not to re-run tests.",
+      "source": "user-report"
+    },
+    {
+      "id": "github-repo-may-be-stale",
+      "tags": ["navigation", "self-heal"],
+      "issue": "GitHub panel source in prompts may be outdated (new Ctrl+B Quick Search feature not in repo); AI relied on old routes.",
+      "fix": "Treat GitHub context as secondary. Primary truth is live page observation + Ctrl+B Quick Search. Never invent routes from stale repo links (especially manage-courier).",
+      "source": "user-report"
+    },
+    {
+      "id": "persist-user-feedback-lessons",
+      "tags": ["self-heal", "openrouter", "meta"],
+      "issue": "Repeated user-reported bugs (404 false passes, date filter, stale UI) were not persisted — OpenRouter kept making the same mistakes.",
+      "fix": "Every user-reported issue must be saved in data/ai-heal-lessons.json (or runtime lessons) and injected into ALL OpenRouter heal + test-generation prompts via formatLessonsForPrompt. Do not repeat listed mistakes.",
+      "source": "user-report"
+    },
+    {
+      "id": "panel-host-typo",
+      "tags": ["environment", "navigation"],
+      "issue": "Panel may be panel.appiify.com (double i) or panel.appify.com — wrong host breaks login/navigation.",
+      "fix": "Use SHIPMOZO_PANEL_URL from env; derive links from live page.url origin after login, not hardcoded hosts.",
+      "source": "user-report"
+    },
+    {
+      "id": "shopify-not-rate-calc-heal",
+      "tags": ["shopify", "testing", "self-heal"],
+      "module": "Shopify",
+      "issue": "Running Shopify E2E tests triggered Rate Calculator OpenRouter self-heal and e2e-batch — wrong module, confusing errors.",
+      "fix": "Only rate_calculator_* e2eFlow scenarios use nav heal + batch. Shopify/chat/api scenarios run as individual steps via run-step API.",
+      "source": "user-report"
+    },
+    {
+      "id": "api-route-not-found-stale-server",
+      "tags": ["testing", "ui", "critical"],
+      "issue": "ERROR: API route not found when starting self-heal — old npm start process without /api/testing/e2e-heal routes.",
+      "fix": "Kill stale node on port 3000, restart (npm start). Verify GET /api/health shows dev-helper-v18+ with e2e-heal and /api/testing/run-step exists. Use http://127.0.0.1:3000 — not dead trycloudflare bookmarks.",
+      "source": "user-report"
+    },
+    {
+      "id": "ui-stale-run-results",
+      "tags": ["testing", "ui"],
+      "issue": "Opening a different saved test dataset still showed pass/fail counts and scenario badges from a previous dataset's run.",
+      "fix": "Bind run results to datasetId — clear run state when dataset.id changes; never display runResult unless runResult.datasetId matches the open dataset.",
+      "source": "user-report"
+    },
+    {
+      "id": "e2e-fast-5-10s-per-case",
+      "tags": ["e2e", "performance", "self-heal"],
+      "module": "Rate Calculator",
+      "issue": "E2E runs had long pauses (0.5–2s sleeps, ~100s dashboard waits, 25s result waits) and re-logged in per scenario — one case took minutes.",
+      "fix": "Target 5–10 seconds per test case. Root fix: ONE browser session for all scenarios in a run (e2e batch), E2E_FAST saved login — no per-scenario login. Nav: 4–6 steps, wait 50–120ms, no sleep >300ms. Uncheck 'Capture panel screenshot' to skip Cloudinary uploads.",
+      "source": "user-report"
+    },
+    {
+      "id": "dataset-json-truncated-sheet",
+      "tags": ["testing", "dataset", "openrouter"],
+      "module": "Orders",
+      "issue": "Generate test dataset failed with invalid JSON — AI returned truncated sheetRows (huge Google Sheet format) for simple order create/verify requirements.",
+      "fix": "For Run-in-UI / order E2E requirements use scenarios[] with e2eFlow order_create_domestic (NOT sheetRows). Uncheck Google Sheet QA format. Keep JSON compact; prefer scenarios-fallback on truncation.",
+      "source": "user-report"
+    },
+    {
+      "id": "dataset-from-docs-fetch-failed",
+      "tags": ["testing", "dataset", "openrouter"],
+      "issue": "Generate test dataset from docs failed with fetch failed and empty Preview — OpenRouter timed out on huge PRD+manual+GitHub prompt.",
+      "fix": "Use compact docs prompt first (8-10 sheetRows), skip GitHub on retry, DATASET_LLM_TIMEOUT_MS=240000, truncate PRD/manual in prompt. Accept partial sheetRows (4+) via JSON recovery.",
+      "source": "user-report"
+    },
+    {
+      "id": "openrouter-credits-max-tokens",
+      "tags": ["testing", "dataset", "openrouter"],
+      "issue": "Generate test dataset failed: OpenRouter credits limit — requested 8000 max_tokens but account can only afford fewer (e.g. 7856).",
+      "fix": "When affordable tokens < 512, order add/verify requirements use built-in order E2E template (no AI). Otherwise DATASET_MAX_OUTPUT_TOKENS=6000 + credit retry. Add credits at openrouter.ai/settings/credits or switch provider in API Settings.",
+      "source": "user-report"
+    },
+    {
+      "id": "order-e2e-unsupported-flow-0s",
+      "tags": ["e2e", "orders", "dataset"],
+      "module": "Orders",
+      "issue": "Order Management E2E scenarios failed instantly (0s) — AI generated titles like 'Verify Recently Added Order' without inputs.e2eFlow; session runner returned Unsupported e2e flow.",
+      "fix": "On Run, OpenRouter scenario self-heal patches inputs.e2eFlow (order_create_domestic vs order_verify_new_orders) — do not rely on hardcoded inference. Verify scenarios reuse ORDER_REF_ID from prior create in same session.",
+      "source": "user-report"
+    },
+    {
+      "id": "testcase-gen-240s-timeout",
+      "tags": ["testing", "dataset", "performance", "critical"],
+      "module": "Test Cases",
+      "severity": "critical",
+      "issue": "Create test cases (generate-test-dataset) timed out at 240s because a sync Claude 4-attempt retry loop blocked the HTTP request.",
+      "fix": "Use async job queue for testcase generation; route testcase LLM to Azure via resolveTestcaseLlmPair; enable TESTCASE_FAST for compact prompts. Never block HTTP on multi-attempt Claude loops — return jobId and poll status.",
+      "source": "conversation-2026-06-15"
+    },
+    {
+      "id": "manual-step-azure-deployment-error",
+      "tags": ["doc-generation", "manual", "llm", "critical"],
+      "module": "Documentation",
+      "severity": "critical",
+      "issue": "Manual doc step failed with 'API deployment does not exist' because UI API Settings model (Claude) was passed to the manual generation step on Azure provider.",
+      "fix": "Always use resolveManualLlmPair() / resolvePrdLlmPair() per doc step — manual and testcase gen on Azure, Claude only for PRD. Never pass the UI-selected model string directly to manual or testcase LLM calls.",
+      "source": "conversation-2026-06-15"
+    },
+    {
+      "id": "docs-direct-url-channels-404",
+      "tags": ["doc-generation", "screenshots", "navigation", "integrations", "critical"],
+      "module": "Integrations",
+      "severity": "critical",
+      "issue": "Screenshot capture saved 404 pages from direct URLs like /channels/amazon or /channels/shopify — these routes do not exist on many tenants.",
+      "fix": "In fast mode set DOCS_CAPTURE_ALLOW_DIRECT_URL=false. Navigate via Ctrl+B Quick Search only. For channel modules never goto /channels/* directly — open Order Channels hub then click the channel in-page.",
+      "source": "conversation-2026-06-15"
+    },
+    {
+      "id": "docs-save-shot-404-bypass",
+      "tags": ["doc-generation", "screenshots", "verification", "critical"],
+      "module": "Integrations",
+      "severity": "critical",
+      "issue": "Fast capture mode saved screenshots of 404 channel pages because save_shot had a bypass for channelish URLs.",
+      "fix": "Always call page_looks_like_not_found before save_shot — reject any page showing Opps/could not be found regardless of URL pattern or fast mode. Never skip 404 check for channel URLs.",
+      "source": "conversation-2026-06-15"
+    },
+    {
+      "id": "navigation-scenarios-skipped-frontend",
+      "tags": ["testing", "dataset", "screenshots", "critical"],
+      "severity": "critical",
+      "issue": "Dataset had 10 scenarios but only 1 ran — navigation-category scenarios were excluded from Frontend/Both hybrid test runs.",
+      "fix": "Treat navigation category as panel UI via isPanelUiScenario (navigation + useLivePanel!==false). Run navigation scenarios as live screenshot/UI captures, not only e2e and screenshots categories.",
+      "source": "conversation-2026-06-15"
+    },
+    {
+      "id": "api-test-false-pass-postman-null",
+      "tags": ["testing", "api", "postman", "critical"],
+      "severity": "critical",
+      "issue": "API test scenarios marked Passed when Postman/Newman failed because evaluateAssertions ignored errors when httpStatus was null.",
+      "fix": "Always call assertPostmanApiOutcome for api/config scenarios with postmanRun. Fail on requestOk===false, collectionFailed>0, or actual.ok===false even when httpStatus is missing.",
+      "source": "conversation-2026-06-15"
+    },
+    {
+      "id": "mermaid-er-invalid-pk-fk-syntax",
+      "tags": ["doc-generation", "prd", "mermaid"],
+      "module": "Documentation",
+      "severity": "high",
+      "issue": "PRD Mermaid ER diagrams failed to render — invalid syntax like 'uuid id PK' or 'PK,FK' on one attribute line.",
+      "fix": "Run sanitizeMermaidBlocksInMarkdown on PRD output. Follow MERMAID_PRD_RULES: one attribute per line, type name only (no PK/FK in erDiagram fields), use relationship notation for keys.",
+      "source": "conversation-2026-06-15"
+    },
+    {
+      "id": "docs-capture-order-channels-timeout",
+      "tags": ["doc-generation", "screenshots", "integrations", "performance"],
+      "module": "Order Channels",
+      "severity": "high",
+      "issue": "Screenshot capture timed out at ~55s for Order Channels / Amazon — module name mismatch and repeated Quick Search loops.",
+      "fix": "Resolve 'order channels' module name to Amazon/channel sub-page. Increase DOCS_CAPTURE_BUDGET_S (90s+ in fast mode). Use two-stage nav: QS 'Order Channels' → in-page click target channel → explore UI. Avoid re-searching the same query.",
+      "source": "conversation-2026-06-15"
+    },
+    {
+      "id": "ui-open-testcases-full-redirect",
+      "tags": ["testing", "ui"],
+      "severity": "medium",
+      "issue": "Opening test cases from Dev Helper showed a blank screen due to full localhost page redirect instead of in-app tab navigation.",
+      "fix": "Switch to in-app tab/panel navigation for test case view — do not window.location to localhost routes that lose React state. Hard-nav only when opening external panel URL.",
+      "source": "conversation-2026-06-15"
+    },
+    {
+      "id": "amazon-quick-search-wrong-flow",
+      "tags": ["navigation", "integrations", "amazon", "critical"],
+      "module": "Amazon",
+      "severity": "critical",
+      "issue": "Quick Search for 'amazon integration' or 'amazon' repeatedly failed — Quick Search is for top-level modules only, not channel sub-pages.",
+      "fix": "Flow: Ctrl+B → Quick Search 'Order Channels' → Enter → click Amazon card/link in-page → explore tabs/UI. Never QS 'amazon integration' in a loop. Amazon is a sub-page under Order Channels, not a standalone QS target.",
+      "source": "conversation-2026-06-15"
+    },
+    {
+      "id": "playwright-mcp-slow-use-fast-capture",
+      "tags": ["doc-generation", "screenshots", "performance", "mcp"],
+      "severity": "high",
+      "issue": "Playwright MCP screenshot gathering was too slow for the doc pipeline — multi-attempt MCP browser loops added minutes per module.",
+      "fix": "Prefer headless Python capture_module_screenshots with DOCS_CAPTURE_FAST=1 and DOCS_CAPTURE_MAX_ATTEMPTS=1. Use Playwright MCP only when the MCP report agent explicitly needs a live snapshot — not for bulk screenshot steps.",
+      "source": "conversation-2026-06-15"
+    },
+    {
+      "id": "negative-ui-needs-proper-runner",
+      "tags": ["testing", "e2e", "ui"],
+      "severity": "high",
+      "issue": "Negative UI test scenarios (invalid form, error banners, API error states) failed when run via navigation/screenshot runner — it cannot validate negative API/form outcomes.",
+      "fix": "Negative validation scenarios need inputs.e2eFlow with assertion steps OR api category with Postman runner — not screenshots/navigation-only runners. Mark negative cases as category api or e2e with explicit verifyTexts/expectedError.",
+      "source": "conversation-2026-06-15"
+    },
+    {
+      "id": "integrations-doc-single-screenshot",
+      "tags": ["doc-generation", "screenshots", "integrations"],
+      "module": "Integrations",
+      "severity": "medium",
+      "issue": "Integrations module docs produced only 1 screenshot despite hub + multiple channels — fast capture budget stopped after the first shot.",
+      "fix": "For integrations/order-channels modules capture hub page plus per-channel exploration shots. Set description to request multi-shot walkthrough; increase shot budget; use channel exploration loop in capture_module_screenshots.",
+      "source": "conversation-2026-06-15"
+    },
+    {
+      "id": "llm-throttle-azure-manual-testcase",
+      "tags": ["doc-generation", "testing", "llm", "performance"],
+      "severity": "high",
+      "issue": "Rate limit / LLM throttle errors when Claude was used for manual generation and testcase creation alongside PRD.",
+      "fix": "Route manual step and testcase generation to Azure via resolveManualLlmPair/resolveTestcaseLlmPair. Reserve Claude/OpenRouter for PRD only. Use paceReportGeneration / llm-throttle between doc steps.",
+      "source": "conversation-2026-06-15"
+    },
+    {
+      "id": "cloudflare-tunnel-stale-urls",
+      "tags": ["environment", "testing", "doc-generation"],
+      "severity": "medium",
+      "issue": "Cloudflare trycloudflare tunnel URLs went stale after server restart — bookmarked tunnel links returned 404 or hit the wrong process.",
+      "fix": "On local dev PC use http://127.0.0.1:3000 (SHIPMOZO_DEV_HELPER_URL) not cached tunnel URLs. Restart tunnel after server restart; verify GET /api/health before sharing links.",
+      "source": "conversation-2026-06-15"
+    },
+    {
+      "id": "ui-hard-refresh-after-jsx",
+      "tags": ["ui", "development"],
+      "severity": "low",
+      "issue": "UI showed stale components after JSX/React changes — hot reload did not pick up route or component updates.",
+      "fix": "Hard refresh browser (Ctrl+Shift+R) or restart npm start after significant JSX changes. Clear browser cache for localhost:3000 when testing new API routes or panels.",
+      "source": "conversation-2026-06-15"
+    },
+    {
+      "id": "nav-channel-hub-first",
+      "tags": ["navigation", "channels", "amazon", "shopify", "critical"],
+      "module": "Order Channels",
+      "issue": "Quick Search for 'amazon integration' or 'amazon channel' directly is wrong — Ctrl+B is for panel modules only, not individual channel pages.",
+      "fix": "For Amazon/Shopify capture: Ctrl+B → Quick Search 'order channels' or 'channels' → land on Order Channels hub → click the Amazon/Shopify card in-page. Channel-specific Quick Search terms are last resort only.",
+      "source": "user-report"
+    }
+  ]
+}

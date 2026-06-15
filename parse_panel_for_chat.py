@@ -17,6 +17,8 @@ from panel_navigate import (
     page_looks_like_not_found,
     text_indicates_not_found,
 )
+from panel_quick_search import navigate_via_quick_search
+from panel_ui_helpers import dismiss_blocking_overlays
 from panel_screenshot import (
     has_module_anchor,
     page_has_usable_content,
@@ -79,6 +81,10 @@ TOPIC_PAGE_HINTS: list[tuple[list[str], list[dict[str, str]]]] = [
             {"text": "Settings", "href": f"{PANEL_BASE}/settings"},
             {"text": "Profile", "href": f"{PANEL_BASE}/profile"},
         ],
+    ),
+    (
+        ["rate calculator", "rate calc", "shipping rate", "freight", "courier rate"],
+        [{"text": "Rate Calculator", "href": f"{PANEL_BASE}/courier/rate-calculator"}],
     ),
 ]
 
@@ -338,6 +344,18 @@ async def browse_for_query(query: str, session_id: str) -> dict:
         p, browser, context, page = await async_login_and_save_state()
         page.set_default_timeout(45000)
         print(f"Chat browse: logged in at {page.url}", file=sys.stderr, flush=True)
+        await dismiss_blocking_overlays(page)
+
+        if await navigate_via_quick_search(page, query):
+            print(f"Chat browse: quick search opened for {query!r}", file=sys.stderr, flush=True)
+            qs_shots, qs_pages, step = await visit_page(
+                page,
+                out_dir,
+                {"text": query, "href": page.url},
+                step,
+            )
+            screenshots.extend(qs_shots)
+            pages_data.extend(qs_pages)
 
         discovered = await discover_sidebar_pages(page, max_pages=12)
         to_visit = pick_pages_to_visit(query, discovered)

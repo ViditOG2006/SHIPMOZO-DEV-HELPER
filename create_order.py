@@ -649,27 +649,11 @@ class ShipmozoOrderBot:
 
     async def _verify_in_order_list(self, reference_id: str) -> bool:
         log(f"Verifying order in list using reference: {reference_id}")
-        await self.page.goto(f"{BASE}/orders/new", wait_until="domcontentloaded")
-        await self.page.wait_for_load_state("networkidle")
+        from panel_orders import goto_new_orders_domestic, search_new_orders
 
-        search = await self.first_visible(
-            [
-                'input[placeholder*="reference"]',
-                'input[placeholder*="Search"]',
-                'input[type="search"]',
-            ],
-            timeout=15000,
-        )
-        if not search:
-            log("Order-list search input not found")
-            return False
-
-        await search.fill(reference_id)
-        await self.page.keyboard.press("Enter")
-        await asyncio.sleep(4)
-
-        page_text = (await self.page.inner_text("body")).lower()
-        found = reference_id.lower() in page_text
+        await goto_new_orders_domestic(self.page, BASE)
+        found = await search_new_orders(self.page, reference_id)
+        page_text = (await self.page.inner_text("body")).lower() if found else ""
         if found:
             await self.page.screenshot(
                 path=str(OUTPUT_DIR / "order_verified_in_list.png"), full_page=True

@@ -610,6 +610,60 @@
         color: var(--text);
       }
 
+      .markdown-body.docs-preview {
+        overflow-x: auto;
+        overflow-y: visible;
+        max-width: 100%;
+        padding: 4px 2px 12px;
+      }
+
+      .markdown-body.docs-preview > :first-child {
+        margin-top: 0;
+      }
+
+      .markdown-body.docs-preview p {
+        margin: 0.65em 0;
+      }
+
+      .markdown-body.docs-preview blockquote {
+        margin: 12px 0;
+        padding: 10px 14px;
+        border-left: 4px solid var(--accent);
+        background: var(--bg);
+        color: var(--text-secondary);
+        border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      }
+
+      .markdown-body.docs-preview hr {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 20px 0;
+      }
+
+      .docs-source-view {
+        margin: 0;
+        padding: 14px 16px;
+        background: #f8fafc;
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        font-family: "Consolas", "SF Mono", "Cascadia Code", monospace;
+        font-size: 12px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
+        overflow-x: auto;
+        max-height: 70vh;
+      }
+
+      .docs-source-view code {
+        font-family: inherit;
+        background: transparent;
+        color: inherit;
+        border: none;
+        padding: 0;
+      }
+
       .markdown-body h1,
       .markdown-body h2,
       .markdown-body h3 {
@@ -659,6 +713,7 @@
       }
 
       .markdown-body .mermaid {
+        display: block;
         background: #f8fafc;
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
@@ -666,6 +721,12 @@
         margin: 14px 0;
         overflow-x: auto;
         text-align: center;
+        min-height: 48px;
+      }
+
+      .markdown-body .mermaid.mermaid-rendered {
+        visibility: visible;
+        opacity: 1;
       }
 
       .markdown-body .mermaid svg {
@@ -673,11 +734,98 @@
         height: auto;
       }
 
+      .markdown-body .mermaid.mermaid-error {
+        text-align: left;
+        background: #fff7ed;
+        border-color: #fdba74;
+        padding: 14px 16px;
+      }
+
+      .markdown-body .mermaid-fallback-wrap {
+        text-align: left;
+      }
+
+      .markdown-body .mermaid-fallback {
+        margin: 8px 0 0;
+        padding: 12px;
+        background: #fff;
+        border-radius: 6px;
+        font-size: 12px;
+        text-align: left;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        border: 1px solid #fed7aa;
+      }
+
+      .markdown-body .mermaid-fallback-note {
+        margin: 0;
+        font-size: 13px;
+        color: #9a3412;
+        text-align: left;
+      }
+
+      .markdown-body .mermaid-fallback-details {
+        margin-top: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .markdown-body .mermaid-fallback-details summary {
+        cursor: pointer;
+        user-select: none;
+      }
+
+      .markdown-body .mermaid-invalid-note {
+        margin: 6px 0 12px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .markdown-body .mermaid-code-fallback {
+        margin: 14px 0;
+      }
+
+      /* Mermaid render sandbox — off-screen only, never in-document diagrams */
+      body > .mermaid-sandbox,
+      body > div.mermaid-sandbox[id^="mermaid-"],
+      body > div.mermaid-sandbox[id^="dmermaid-"] {
+        position: absolute !important;
+        left: -9999px !important;
+        top: 0 !important;
+        width: 1px !important;
+        height: 1px !important;
+        overflow: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+        z-index: -1 !important;
+      }
+
+      .markdown-body .markdown-video {
+        margin: 14px 0;
+      }
+
+      .markdown-body .markdown-video video {
+        display: block;
+        width: 100%;
+        max-height: 360px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: #0f172a;
+      }
+
+      .markdown-body .markdown-video figcaption {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 6px;
+      }
+
       .markdown-body table {
         border-collapse: collapse;
         width: 100%;
         margin: 12px 0;
         font-size: 13px;
+        display: block;
+        overflow-x: auto;
       }
 
       .markdown-body th,
@@ -1018,6 +1166,62 @@
         margin: 12px 0;
       }
 
+      .heal-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        background: rgba(15, 23, 42, 0.55);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+
+      .heal-modal {
+        width: min(520px, 100%);
+        max-height: 80vh;
+        overflow: auto;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+      }
+
+      .heal-console {
+        max-height: 220px;
+        margin-top: 12px;
+      }
+
+      .sheet-table-wrap {
+        overflow: auto;
+        max-height: 520px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+      }
+
+      .sheet-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+
+      .sheet-table th,
+      .sheet-table td {
+        border: 1px solid var(--border);
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: top;
+        min-width: 90px;
+        max-width: 280px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .sheet-table th {
+        background: var(--surface-elevated, #f1f5f9);
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        font-weight: 600;
+      }
+
       .run-progress-fill {
         height: 100%;
         background: var(--accent);
@@ -1094,18 +1298,19 @@
   <body>
     <div id="root"></div>
 
-    <script src="/api-client.js"></script>
-    <script src="/storage.js"></script>
+    <script src="/api-client.js?v=16"></script>
+    <script src="/storage.js?v=13"></script>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-    <script src="/markdown-utils.js"></script>
-    <script type="text/babel" src="/ai-panel.jsx"></script>
-    <script type="text/babel" src="/docs-panel.jsx"></script>
-    <script type="text/babel" src="/reports-panel.jsx"></script>
-    <script type="text/babel" src="/testing-panel.jsx"></script>
-    <script type="text/babel" src="/app.jsx"></script>
+    <script src="/mermaid-sanitize.js?v=5"></script>
+    <script src="/markdown-utils.js?v=19"></script>
+    <script type="text/babel" src="/ai-panel.jsx?v=16"></script>
+    <script type="text/babel" src="/docs-panel.jsx?v=21"></script>
+    <script type="text/babel" src="/reports-panel.jsx?v=17"></script>
+    <script type="text/babel" src="/testing-panel.jsx?v=34"></script>
+    <script type="text/babel" src="/app.jsx?v=14"></script>
   </body>
 </html>

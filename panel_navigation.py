@@ -10,7 +10,9 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parent
 NAV_MAP_PATH = ROOT / "data" / "panel-navigation.json"
 
-PANEL_BASE = "https://panel.appiify.com"
+from panel_url import default_panel_base
+
+PANEL_BASE = default_panel_base()
 
 
 def slugify(value: str) -> str:
@@ -60,6 +62,16 @@ def default_navigation_map() -> dict:
         {"text": "Catalog", "href": f"{PANEL_BASE}/catalog", "keywords": ["catalog", "product"]},
         {"text": "Reports", "href": f"{PANEL_BASE}/reports", "keywords": ["reports", "analytics"]},
         {"text": "Tickets", "href": f"{PANEL_BASE}/tickets", "keywords": ["tickets", "support"]},
+        {
+            "text": "Rate Calculator",
+            "href": f"{PANEL_BASE}/courier/rate-calculator",
+            "keywords": ["rate", "calculator", "courier", "shipping", "freight", "charges"],
+        },
+        {
+            "text": "Manage Courier",
+            "href": f"{PANEL_BASE}/courier/manage-courier",
+            "keywords": ["courier", "manage", "rate", "calculator"],
+        },
     ]
     return {
         "version": 1,
@@ -305,3 +317,94 @@ def clean_navigation_map_file() -> dict:
     }
     save_navigation_map(data)
     return data
+
+
+def score_page_for_module(module_name: str, description: str, nav_page: dict) -> int:
+    """Score a nav-map entry against a target module (higher = better match)."""
+    from panel_doc_module import (
+        is_add_order_target,
+        is_new_orders_target,
+        is_rate_calculator_target,
+        resolve_doc_module,
+    )
+
+    canonical = resolve_doc_module(module_name, description)
+    key = f"{canonical} {module_name} {description}".lower()
+    parts = [p for p in re.split(r"[^a-z0-9]+", key) if len(p) >= 3]
+    nav_text = nav_page.get("text", "").lower()
+    nav_path = (nav_page.get("path") or nav_path_key(nav_page.get("href", ""))).lower()
+    hay = " ".join(
+        [
+            nav_page.get("text", ""),
+            nav_page.get("href", ""),
+            nav_page.get("path", ""),
+            " ".join(nav_page.get("keywords", [])),
+        ]
+    ).lower()
+    score = 0
+    for part in parts:
+        if part in hay:
+            score += 2
+        if nav_path and part in nav_path.replace("/", " "):
+            score += 3
+    name_key = canonical.lower().strip()
+    if name_key and name_key in hay:
+        score += 4
+    if name_key and name_key == nav_text:
+        score += 8
+
+    if is_rate_calculator_target(module_name, description):
+        if "rate" in nav_text and "calcul" in nav_text:
+            score += 12
+        elif "calcul" in hay and "calcul" in nav_text:
+            score += 8
+        if "manage-courier" in nav_path:
+            score -= 20
+
+    if is_add_order_target(module_name, description):
+        if "/orders/add" in nav_path:
+            score += 15
+        if "add order" in nav_text:
+            score += 10
+        if "/orders/new" in nav_path and "/orders/add" not in nav_path:
+            score -= 12
+
+    if is_new_orders_target(module_name, description):
+        if "/orders/new" in nav_path:
+            score += 12
+        if "/orders/add" in nav_path:
+            score -= 10
+
+    return score
+
+
+def rank_pages_for_module(
+    module_name: str,
+    description: str = "",
+    discovered: list[dict] | None = None,
+) -> list[dict]:
+    """Rank panel-navigation.json (+ optional live sidebar links) for a module."""
+    seed = load_navigation_map().get("pages", [])
+    scored: list[tuple[int, dict]] = []
+    for nav_page in merge_page_lists(discovered or [], seed):
+        if is_junk_nav_label(nav_page.get("text", "")):
+            continue
+        if is_junk_nav_href(nav_page.get("href", "")):
+            continue
+        score = score_page_for_module(module_name, description, nav_page)
+        if score > 0:
+            scored.append((score, nav_page))
+    scored.sort(key=lambda x: (-x[0], x[1].get("text", "")))
+    seen: set[str] = set()
+    ranked: list[dict] = []
+    for _, nav_page in scored:
+        href = nav_page.get("href", "")
+        if not href or href in seen:
+            continue
+        seen.add(href)
+        ranked.append(nav_page)
+    return ranked
+
+
+def top_nav_map_urls(module_name: str, description: str = "", limit: int = 4) -> list[str]:
+    return [p.get("href", "") for p in rank_pages_for_module(module_name, description)[:limit] if p.get("href")]

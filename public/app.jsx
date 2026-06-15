@@ -18,7 +18,7 @@ const VIEWS = {
 
     title: "Chat",
 
-    subtitle: "Ask questions — browses the live Shipmozo panel for answers",
+    subtitle: "Ask questions — answers from saved PRDs and user manuals (instant)",
 
     icon: "💬",
 
@@ -38,7 +38,7 @@ const VIEWS = {
 
     title: "Test Dataset",
 
-    subtitle: "Describe requirements in text — AI generates scenarios and inputs",
+    subtitle: "Generate scenarios from PRD + manual, or describe requirements in text",
 
     icon: "🧪",
 
@@ -72,11 +72,28 @@ function App() {
 
   const [serverError, setServerError] = useState("");
 
+  const [publicUrl, setPublicUrl] = useState("");
+
+  const [recommendedUrl, setRecommendedUrl] = useState("");
+
+  const [localUrl, setLocalUrl] = useState("");
+
+  const [tunnelStatus, setTunnelStatus] = useState("off");
+
+  const [tunnelError, setTunnelError] = useState("");
+
   const [docsBusy, setDocsBusy] = useState(false);
 
   const [chatBusy, setChatBusy] = useState(false);
 
   const [testingBusy, setTestingBusy] = useState(false);
+
+  const [testingImport, setTestingImport] = useState(null);
+
+  const goToTestingWithDataset = (dataset) => {
+    setTestingImport(dataset || null);
+    setView("testing");
+  };
 
 
 
@@ -97,6 +114,16 @@ function App() {
       setServerOk(true);
 
       setServerError("");
+
+      setPublicUrl(result.data?.publicUrl || "");
+
+      setRecommendedUrl(result.data?.recommendedUrl || result.data?.localUrl || "");
+
+      setLocalUrl(result.data?.localUrl || "");
+
+      setTunnelStatus(result.data?.tunnelStatus || "off");
+
+      setTunnelError(result.data?.tunnelError || "");
 
       const data = result.data?.ai || {};
 
@@ -136,7 +163,7 @@ function App() {
 
       });
 
-    const id = setInterval(() => refreshServerStatus(), 15000);
+    const id = setInterval(() => refreshServerStatus(), 5000);
 
     return () => clearInterval(id);
 
@@ -230,6 +257,67 @@ function App() {
 
           )}
 
+          {recommendedUrl && (
+
+            <div className="status-pill" title="Always use this on your PC — tunnel URLs expire after restart">
+
+              💻{" "}
+              <a
+                href={recommendedUrl}
+                onClick={(e) => {
+                  try {
+                    if (new URL(recommendedUrl).origin === window.location.origin) {
+                      e.preventDefault();
+                    }
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+                style={{ color: "inherit", fontWeight: 600 }}
+              >
+                {recommendedUrl.replace(/^https?:\/\//, "")}
+              </a>
+
+            </div>
+
+          )}
+
+          {tunnelStatus === "starting" && (
+
+            <div className="status-pill" title="New URL appears in ~5s after npm start">
+
+              📱 Tunnel starting…
+
+            </div>
+
+          )}
+
+          {tunnelStatus === "failed" && (
+
+            <div className="status-pill" title={tunnelError || "Cloudflare tunnel failed"}>
+
+              📱 Tunnel failed — use laptop URL or run: winget install Cloudflare.cloudflared
+
+            </div>
+
+          )}
+
+          {publicUrl && tunnelStatus === "ready" && (
+
+            <div className="status-pill public-url-pill" title="Phone/tablet only — dies when you stop npm start; do not bookmark">
+
+              📱{" "}
+
+              <a href={publicUrl} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
+
+                {publicUrl.replace("https://", "")}
+
+              </a>
+
+            </div>
+
+          )}
+
         </div>
 
       </aside>
@@ -256,9 +344,11 @@ function App() {
 
             <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>
 
-              In the project folder run <code>npm start</code>, then open{" "}
+              Run <code>npm start</code> in the project folder, then open{" "}
 
               <a href="http://127.0.0.1:3000">http://127.0.0.1:3000</a>
+
+              {" "}on this PC. Old <code>trycloudflare.com</code> links stop working after restart.
 
             </p>
 
@@ -280,13 +370,25 @@ function App() {
 
             onBusyChange={setDocsBusy}
 
+            onGoToTesting={goToTestingWithDataset}
+
           />
 
         </div>
 
         <div style={{ display: view === "reports" ? "block" : "none" }}>
 
-          <ReportsPanel />
+          <ReportsPanel
+
+            configured={configured}
+
+            model={model}
+
+            provider={provider}
+
+            onGoToTesting={goToTestingWithDataset}
+
+          />
 
         </div>
 
@@ -301,6 +403,10 @@ function App() {
             provider={provider}
 
             onBusyChange={setTestingBusy}
+
+            importDataset={testingImport}
+
+            onImportDatasetHandled={() => setTestingImport(null)}
 
           />
 

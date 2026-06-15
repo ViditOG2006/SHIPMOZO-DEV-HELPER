@@ -4,7 +4,12 @@
   "description": "",
   "main": "server.js",
   "scripts": {
+    "prestart": "node scripts/ensure-port-free.js",
     "start": "node server.js",
+    "tunnel:install": "node -e \"require('./lib/ensure-cloudflared').resolveCloudflaredBinary({allowDownload:true,log:console.log}).then(p=>console.log(p||'failed'))\"",
+    "start:public": "node server.js",
+    "start:all": "node server.js",
+    "seed:rate-calculator": "node scripts/seed_rate_calculator_dataset.js",
     "dev": "node server.js",
     "docs:heal": "node scripts/run_doc_self_heal.js",
     "discover-nav": "python discover_panel_navigation.py",
@@ -15,6 +20,8 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "express": "^5.2.1"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "express": "^5.2.1",
+    "newman": "^6.2.2"
   }
 }

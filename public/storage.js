@@ -28,6 +28,7 @@
   function clearAllAppData() {
     remove("shipmozo-chat-v1");
     remove("shipmozo-docs-v1");
+    remove("shipmozo-github-repo-v1");
   }
 
   window.DevHelperStorage = {
@@ -35,6 +36,7 @@
       CHAT: "shipmozo-chat-v1",
       DOCS: "shipmozo-docs-v1",
       TESTING: "shipmozo-testing-v1",
+      GITHUB_REPO: "shipmozo-github-repo-v1",
     },
     loadJson,
     saveJson,

@@ -1,6 +1,7 @@
 const { useEffect, useState, useRef, useLayoutEffect } = React;
 
 const TESTING_KEY = window.DevHelperStorage?.KEYS?.TESTING || "shipmozo-testing-v1";
+const DOCS_KEY = window.DevHelperStorage?.KEYS?.DOCS || "shipmozo-docs-v1";
 
 const TEST_AREAS = [
   { id: "chat", label: "Chat (live panel Q&A)" },
@@ -33,8 +34,24 @@ const DEFAULT_FORM = {
   includeLivePanel: true,
   includeApiCases: true,
   includeOfflineCases: true,
+  qaSheetFormat: false,
   showAdvanced: false,
 };
+
+const SHEET_COLUMNS = [
+  "Submodule",
+  "Module",
+  "TC_ID",
+  "Test_Level",
+  "Description",
+  "Pre-requisite",
+  "Steps",
+  "Expected",
+  "Priority",
+  "Testing Type",
+  "Tags",
+  "Platform",
+];
 
 function loadFormState() {
   const saved = window.DevHelperStorage?.loadJson(TESTING_KEY, null);
@@ -48,7 +65,173 @@ function priorityClass(p) {
   return "badge badge-muted";
 }
 
-function TestingPanel({ configured, model, provider, onBusyChange }) {
+function isE2ePanelScenario(s) {
+  return s.category === "e2e" && (s.inputs?.e2eFlow || s.inputs?.uiAction);
+}
+
+function isOrderE2eScenario(s) {
+  const flow = String(s.inputs?.e2eFlow || s.inputs?.uiAction || "");
+  return flow.startsWith("order_create");
+}
+
+/** Only Rate Calculator flows use Playwright batch + MCP nav heal. */
+function isRateCalculatorE2eScenario(s) {
+  const flow = String(s.inputs?.e2eFlow || s.inputs?.uiAction || "");
+  return flow.startsWith("rate_calculator");
+}
+
+function scriptHealLabel(aiScope) {
+  return aiScope?.backends?.scriptDebug === "mcp" ? "Playwright MCP" : "OpenRouter";
+}
+
+function isPanelE2eScenario(scenario) {
+  return (
+    scenario?.category === "e2e" &&
+    Boolean(scenario.inputs?.e2eFlow || scenario.inputs?.uiAction)
+  );
+}
+
+function isPanelUiScenario(scenario) {
+  if (!scenario) return false;
+  if (isPanelE2eScenario(scenario)) return true;
+  if (scenario.category === "screenshots") return true;
+  if (scenario.category === "navigation" && scenario.inputs?.useLivePanel !== false) {
+    return true;
+  }
+  return false;
+}
+
+function isDatasetBackendOnly(ds) {
+  if (!ds) return false;
+  if (ds.backendOnly || ds.options?.backendOnly || ds.sourceDocs?.backendOnly) return true;
+  const blob = `${ds.sourceDocs?.moduleName || ""} ${ds.title || ""}`.toLowerCase();
+  return /pincode serviceability|serviceability api|webhook|api-only|api only|backend service/.test(blob);
+}
+const FOLDER_UI_PAIR_COUNTS = {
+  "00_Setup_And_Auth": 1,
+  "01_Warehouse_APIs": 1,
+  "02_Order_APIs": 1,
+  "05_Utility_APIs": 2,
+};
+
+function countPairedUiFromFolders(folders = []) {
+  return folders.reduce((n, f) => n + (FOLDER_UI_PAIR_COUNTS[String(f || "").trim()] || 0), 0);
+}
+
+function groupScenariosForRun(scenarios, { apiFirst = true } = {}) {
+  const panelE2e = scenarios.filter(isPanelE2eScenario);
+  const panelUiSteps = scenarios.filter((s) => isPanelUiScenario(s) && !isPanelE2eScenario(s));
+  const apiSteps = scenarios.filter((s) => !isPanelUiScenario(s));
+  const groups = [];
+  if (apiFirst) {
+    for (const s of apiSteps) groups.push({ type: "step", scenario: s });
+    if (panelE2e.length) groups.push({ type: "e2e_batch", scenarios: panelE2e });
+    for (const s of panelUiSteps) groups.push({ type: "step", scenario: s });
+  } else {
+    if (panelE2e.length) groups.push({ type: "e2e_batch", scenarios: panelE2e });
+    for (const s of panelUiSteps) groups.push({ type: "step", scenario: s });
+    for (const s of apiSteps) groups.push({ type: "step", scenario: s });
+  }
+  return groups;
+}
+
+async function assertTestingApiReady(requiredFeatures = []) {
+  const health = await window.DevHelperApi.fetchJson("/api/health", { timeoutMs: 10000 });
+  const features = health.features || [];
+  const missing = requiredFeatures.filter((f) => !features.includes(f));
+  if (missing.length) {
+    throw new Error(
+      `Server API out of date (${health.version || "unknown"}). Missing: ${missing.join(", ")}. ` +
+        `Stop the old process, run npm start, open http://127.0.0.1:3000 and hard-refresh (Ctrl+Shift+R).`
+    );
+  }
+  return health;
+}
+
+function isStopError(err) {
+  return Boolean(err?.cancelled) || /stopped by user/i.test(String(err?.message || err));
+}
+
+function formatHealAttempt(a) {
+  if (!a) return "";
+  if (a.logLine) return a.logLine;
+  const id = a.id || "strategy";
+  const detail = a.query
+    ? ` query="${a.query}"`
+    : a.url
+      ? ` ${a.url}`
+      : a.label
+        ? ` "${a.label}"`
+        : "";
+  const where = a.pageUrl ? ` → ${a.pageUrl}` : "";
+  return `${a.ok ? "✓" : "✗"} ${id}${detail}${where} (${a.ms ?? "?"}ms)`;
+}
+
+function healAttemptsToLog(attempts) {
+  const lines = [];
+  for (const a of attempts || []) {
+    lines.push(formatHealAttempt(a));
+    if (a.logs?.length) {
+      a.logs.forEach((sub) => lines.push(`    ${sub}`));
+    }
+  }
+  return lines;
+}
+
+function syncLiveRunProgress(lp, cursorRef, { appendLog, setHealState, elapsedSeconds }) {
+  if (!lp) return;
+  const lines = lp.logLines || [];
+  if (lines.length > cursorRef.current) {
+    lines.slice(cursorRef.current).forEach((line) => appendLog(line));
+    cursorRef.current = lines.length;
+  }
+  if (lp.attempts?.length || lp.phase) {
+    const phase =
+      lp.phase === "failed" ? "failed" : lp.phase === "done" ? "done" : "running";
+    setHealState({
+      phase,
+      attempts: lp.attempts || [],
+      log: healAttemptsToLog(lp.attempts || []),
+      elapsedSeconds,
+    });
+  }
+}
+
+async function pollTestingJob(
+  startPath,
+  statusPath,
+  body,
+  { onTick, maxWaitMs = 600000, shouldStop, pollMs = 1000 } = {}
+) {
+  const start = await window.DevHelperApi.fetchJson(startPath, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    timeoutMs: 30000,
+    body: JSON.stringify(body),
+  });
+  const jobId = start.jobId;
+  const started = Date.now();
+  while (Date.now() - started < maxWaitMs) {
+    if (shouldStop?.()) {
+      const err = new Error("Stopped by user");
+      err.cancelled = true;
+      throw err;
+    }
+    await new Promise((r) => setTimeout(r, pollMs));
+    const status = await window.DevHelperApi.fetchJson(`${statusPath}/${jobId}`, { timeoutMs: 20000 });
+    onTick?.(status);
+    if (status.status === "done") return status.result;
+    if (status.status === "cancelled") {
+      const err = new Error(status.error || "Stopped by user");
+      err.cancelled = true;
+      throw err;
+    }
+    if (status.status === "error") throw new Error(status.error || "Job failed");
+  }
+  throw new Error(`Timed out after ${Math.round(maxWaitMs / 1000)}s`);
+}
+
+function TestingPanel({ configured, model, provider, onBusyChange, importDataset, onImportDatasetHandled }) {
   const [form, setForm] = useState(loadFormState);
   const [dataset, setDataset] = useState(null);
   const [savedList, setSavedList] = useState([]);
@@ -57,13 +240,54 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
   const [runResult, setRunResult] = useState(null);
-  const [skipLive, setSkipLive] = useState(false);
-  const [captureEvidence, setCaptureEvidence] = useState(true);
+  const [skipLive, setSkipLive] = useState(true);
+  const [captureEvidence, setCaptureEvidence] = useState(false);
+  const [showBrowser, setShowBrowser] = useState(false);
+  const [runTarget, setRunTarget] = useState("backend");
+  const [includeUiOnImport, setIncludeUiOnImport] = useState(false);
+  const [frontendNotes, setFrontendNotes] = useState("");
   const [runProgress, setRunProgress] = useState("");
   const [runLog, setRunLog] = useState([]);
   const [currentScenario, setCurrentScenario] = useState(null);
   const [liveResults, setLiveResults] = useState([]);
+  const [healState, setHealState] = useState(null);
+  const [aiScope, setAiScope] = useState(null);
+  const [importDatasetText, setImportDatasetText] = useState("");
+  const [importNavText, setImportNavText] = useState("");
+  const [postmanAgentRequirement, setPostmanAgentRequirement] = useState("");
+  const [postmanCollectionId, setPostmanCollectionId] = useState("");
+  const [postmanMode, setPostmanMode] = useState("import");
+  const [postmanGroups, setPostmanGroups] = useState([]);
+  const [postmanSelectedFolders, setPostmanSelectedFolders] = useState([]);
+  const [postmanGroupsLoading, setPostmanGroupsLoading] = useState(false);
+  const [setupStatus, setSetupStatus] = useState(null);
+  const [navScriptInfo, setNavScriptInfo] = useState("");
   const summaryRef = useRef(null);
+  const runControlRef = useRef({ runId: null, stop: false });
+  const liveLogCursorRef = useRef(0);
+  const openDatasetRef = useRef(null);
+
+  const clearRunState = () => {
+    setRunResult(null);
+    setLiveResults([]);
+    setRunLog([]);
+    setHealState(null);
+    setRunProgress("");
+    setCurrentScenario(null);
+    runControlRef.current = { runId: null, stop: false };
+  };
+
+  /** Only show run output that belongs to the dataset currently open in the UI. */
+  const runForCurrentDataset =
+    runResult && dataset && runResult.datasetId === dataset.id ? runResult : null;
+  const liveForCurrentDataset =
+    loading || runForCurrentDataset ? liveResults : [];
+
+  const testcaseBackend = aiScope?.backends?.testcaseGen || "scripts";
+  const scriptFirst =
+    testcaseBackend === "scripts" ||
+    testcaseBackend === "import" ||
+    testcaseBackend === "none";
 
   const setField = (key, value) => setForm((f) => ({ ...f, [key]: value }));
 
@@ -95,6 +319,168 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
     window.DevHelperApi.fetchJson("/api/testing/datasets")
       .then((d) => setSavedList(d.datasets || []))
       .catch(() => {});
+    window.DevHelperApi.fetchJson("/api/health", { timeoutMs: 10000 })
+      .then((h) => setAiScope(h.aiScope || h.ai?.aiScope || null))
+      .catch(() => {});
+    window.DevHelperApi.fetchJson("/api/testing/setup", { timeoutMs: 10000 })
+      .then((s) => {
+        setSetupStatus(s);
+        const hint = s.items?.find((i) => i.id === "postman_collection")?.hint || "";
+        const m = hint.match(/POSTMAN_COLLECTION_ID=([^\s]+)/);
+        if (m?.[1]) setPostmanCollectionId(m[1]);
+      })
+      .catch(() => {});
+    window.DevHelperApi.fetchJson("/api/testing/scripts/nav", { timeoutMs: 8000 })
+      .then((d) => {
+        if (d.script?.navSteps?.length) {
+          setNavScriptInfo(`${d.script.navSteps.length} nav step(s) on disk`);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const loadPostmanGroups = async (collectionIdOverride) => {
+    const cid =
+      String(collectionIdOverride || postmanCollectionId || "").trim() ||
+      setupStatus?.items?.find((i) => i.id === "postman_collection")?.hint?.match(
+        /POSTMAN_COLLECTION_ID=(.+)$/
+      )?.[1] ||
+      "";
+    if (!cid) return;
+    setPostmanGroupsLoading(true);
+    try {
+      const data = await window.DevHelperApi.fetchJson(
+        `/api/testing/postman/collection-groups?collectionId=${encodeURIComponent(cid)}`,
+        { timeoutMs: 120000 }
+      );
+      setPostmanGroups(data.groups || []);
+      if (!postmanCollectionId.trim()) {
+        setPostmanCollectionId(data.collectionId || cid);
+      }
+    } catch (err) {
+      setMessage(String(err.message || err));
+      setMessageType("err");
+    } finally {
+      setPostmanGroupsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!setupStatus) return;
+    const collOk = setupStatus.items?.find((i) => i.id === "postman_collection")?.ok;
+    if (collOk || postmanCollectionId.trim()) {
+      loadPostmanGroups();
+    }
+  }, [setupStatus]);
+
+  const togglePostmanFolder = (folderId) => {
+    setPostmanSelectedFolders((prev) =>
+      prev.includes(folderId) ? prev.filter((x) => x !== folderId) : [...prev, folderId]
+    );
+  };
+
+  useEffect(() => {
+    clearRunState();
+  }, [dataset?.id]);
+
+  const applyImportedDataset = (ds) => {
+    if (!ds) return false;
+    const scenarioCount = ds.scenarios?.length || ds.scenarioCount || 0;
+    const sheetCount = ds.sheetRows?.length || ds.sheetRowCount || 0;
+    if (!scenarioCount && !sheetCount) return false;
+
+    clearRunState();
+    setDataset(ds);
+    if (isDatasetBackendOnly(ds) && runTarget === "frontend") {
+      setRunTarget("backend");
+    }
+    if (ds.postman?.selectedFolders?.length) {
+      setPostmanSelectedFolders(ds.postman.selectedFolders);
+    }
+    if (ds.postman?.groups?.length) {
+      setPostmanGroups(ds.postman.groups);
+    }
+    setActiveView(sheetCount && !scenarioCount ? "google_sheet" : "scenarios");
+    const from = ds.sourceDocs?.moduleName || ds.title || "docs";
+    const count = sheetCount || scenarioCount;
+    const kind = sheetCount ? "sheet test cases" : "scenarios";
+    const groupNote = ds.postman?.selectedFolders?.length
+      ? ` (${ds.postman.selectedFolders.length} API group(s))`
+      : "";
+    setMessage(`Loaded ${count} ${kind} from ${from}${groupNote}`);
+    setMessageType("ok");
+    window.DevHelperApi.fetchJson("/api/testing/datasets")
+      .then((d) => setSavedList(d.datasets || []))
+      .catch(() => {});
+    return true;
+  };
+
+  const resolveDatasetPayload = async (dsOrId) => {
+    let ds =
+      typeof dsOrId === "string"
+        ? (await window.DevHelperApi.fetchJson(`/api/testing/datasets/${dsOrId}`)).dataset
+        : dsOrId;
+    if (ds?.id && !ds.scenarios?.length && !ds.sheetRows?.length) {
+      const full = await window.DevHelperApi.fetchJson(`/api/testing/datasets/${ds.id}`);
+      ds = full.dataset;
+    }
+    return ds;
+  };
+
+  const openDataset = async (dsOrId) => {
+    setLoading(true);
+    setMessage("");
+    try {
+      const ds = await resolveDatasetPayload(dsOrId);
+      if (!applyImportedDataset(ds)) {
+        throw new Error("Dataset is empty or could not be loaded.");
+      }
+    } catch (err) {
+      setMessage(String(err));
+      setMessageType("err");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  openDatasetRef.current = openDataset;
+
+  useEffect(() => {
+    if (!importDataset) return;
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setMessage("");
+      try {
+        const ds = await resolveDatasetPayload(importDataset);
+        if (cancelled) return;
+        if (!applyImportedDataset(ds)) {
+          throw new Error("Dataset is empty or could not be loaded.");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setMessage(String(err));
+          setMessageType("err");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          onImportDatasetHandled?.();
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [importDataset]);
+
+  useEffect(() => {
+    const handler = (e) => {
+      const fn = openDatasetRef.current;
+      if (fn) fn(e.detail?.dataset).catch(() => {});
+    };
+    window.addEventListener("devhelper:import-dataset", handler);
+    return () => window.removeEventListener("devhelper:import-dataset", handler);
   }, []);
 
   const buildOptions = () => ({
@@ -108,10 +494,11 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
     includeLivePanel: form.includeLivePanel,
     includeApiCases: form.includeApiCases,
     includeOfflineCases: form.includeOfflineCases,
+    qaSheetFormat: form.qaSheetFormat === true,
   });
 
   const resultByScenarioId = (id) =>
-    (runResult?.results || liveResults)?.find((r) => r.scenarioId === id);
+    (runForCurrentDataset?.results || liveForCurrentDataset)?.find((r) => r.scenarioId === id);
 
   const statusBadge = (status) => {
     if (!status) return null;
@@ -126,71 +513,418 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
 
   const appendLog = (line) => setRunLog((prev) => [...prev, line]);
 
+  const logScenarioResult = (scenario, result) => {
+    const shotNote = result.screenshots?.length
+      ? ` · ${result.screenshots.length} screenshot(s)`
+      : result.evidenceError
+        ? ` · no screenshot (${result.evidenceError})`
+        : "";
+    appendLog(
+      `  ${result.status === "passed" ? "✓" : result.status === "failed" ? "✗" : "○"} ${scenario.id} ${result.status}${shotNote} (${Math.round((result.durationMs || 0) / 1000)}s)`
+    );
+    if (result.assertions?.failures?.length) {
+      result.assertions.failures.forEach((f) => appendLog(`    · ${f}`));
+    }
+    if (result.assertions?.skipped?.length) {
+      result.assertions.skipped.slice(0, 4).forEach((s) => appendLog(`    ○ ${s}`));
+      if (result.assertions.skipped.length > 4) {
+        appendLog(`    ○ …and ${result.assertions.skipped.length - 4} relaxed checks`);
+      }
+    }
+  };
+
+  const shouldStopRun = () => Boolean(runControlRef.current.stop);
+
+  const stopTests = async () => {
+    const runId = runControlRef.current.runId;
+    if (!runId || runControlRef.current.stop) return;
+    runControlRef.current.stop = true;
+    appendLog("■ Stop requested — closing browser and cancelling jobs…");
+    setMessage("Stopping test run…");
+    setMessageType("info");
+    try {
+      await window.DevHelperApi.fetchJson("/api/testing/run/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        timeoutMs: 15000,
+        body: JSON.stringify({ runId, reason: "Stopped by user" }),
+      });
+    } catch (err) {
+      appendLog(`  … stop signal: ${err}`);
+    }
+  };
+
+  const runSingleScenario = async (scenario, runId, index, total) => {
+    setCurrentScenario(scenario);
+    setRunProgress(`${index} / ${total}: ${scenario.id}`);
+    appendLog(`▶ ${scenario.id} — ${scenario.title}`);
+
+    const stepStart = await window.DevHelperApi.fetchJson("/api/testing/run-step/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      timeoutMs: 30000,
+      body: JSON.stringify({
+        runId,
+        scenario,
+        index,
+        total,
+        skipLive,
+        captureEvidence,
+        showBrowser,
+        model,
+        provider,
+        postmanFolders: dataset?.postman?.selectedFolders || null,
+        captureEvidence: uiEvidenceEnabled,
+        runTarget,
+      }),
+    });
+
+    const jobId = stepStart.jobId;
+    const pollMs = 2500;
+    const maxWaitMs = 600000;
+    const pollStarted = Date.now();
+    let step = null;
+    let networkFails = 0;
+
+    while (Date.now() - pollStarted < maxWaitMs) {
+      if (shouldStopRun()) {
+        const err = new Error("Stopped by user");
+        err.cancelled = true;
+        throw err;
+      }
+      await new Promise((r) => setTimeout(r, pollMs));
+      const sec = Math.floor((Date.now() - pollStarted) / 1000);
+      setRunProgress(`${index} / ${total}: ${scenario.id} (${sec}s)`);
+      try {
+        const status = await window.DevHelperApi.fetchJson(
+          `/api/testing/run-step/status/${jobId}`,
+          { timeoutMs: 20000 }
+        );
+        networkFails = 0;
+        if (status.status === "done") {
+          step = { result: status.result };
+          break;
+        }
+        if (status.status === "cancelled") {
+          const err = new Error(status.error || "Stopped by user");
+          err.cancelled = true;
+          throw err;
+        }
+        if (status.status === "error") {
+          throw new Error(status.error || "Test step failed");
+        }
+      } catch (pollErr) {
+        if (String(pollErr).includes("Test step failed")) throw pollErr;
+        networkFails += 1;
+        if (networkFails > 24) throw pollErr;
+        appendLog(`  … reconnecting (${networkFails})`);
+      }
+    }
+
+    if (!step?.result) {
+      throw new Error(`Test step timed out after ${Math.round(maxWaitMs / 1000)}s`);
+    }
+    return step.result;
+  };
+
+  const copySheetTsv = async () => {
+    if (!dataset?.sheetTsv && !dataset?.sheetRows?.length) return;
+    const tsv =
+      dataset.sheetTsv ||
+      [SHEET_COLUMNS.join("\t")]
+        .concat(
+          (dataset.sheetRows || []).map((row) =>
+            SHEET_COLUMNS.map((col) => String(row[col] || "").replace(/\t/g, " ").replace(/\n/g, " ")).join(
+              "\t"
+            )
+          )
+        )
+        .join("\n");
+    try {
+      await navigator.clipboard.writeText(tsv);
+      setMessage("Google Sheet TSV copied — paste into sheet row 1.");
+      setMessageType("ok");
+    } catch {
+      setMessage("Could not copy — select from Google Sheet tab manually.");
+      setMessageType("err");
+    }
+  };
+
+  const downloadSheetCsv = () => {
+    const rows = dataset?.sheetRows || [];
+    if (!rows.length) return;
+    const quote = (t) => `"${String(t || "").replace(/"/g, '""').replace(/\n/g, " ")}"`;
+    const csv = [
+      SHEET_COLUMNS.map(quote).join(","),
+      ...rows.map((row) => SHEET_COLUMNS.map((col) => quote(row[col])).join(",")),
+    ].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `test-cases-${dataset.id}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const countApiScenarios = (list) => (list || []).filter((s) => s.category === "api").length;
+  const countUiScenarios = (list) => (list || []).filter(isPanelUiScenario).length;
+  const effectiveUiCount = (list, folders) => {
+    const inDataset = countUiScenarios(list);
+    return inDataset || countPairedUiFromFolders(folders);
+  };
+
+  const filterScenariosForRunTarget = (list, target, backendOnlyDataset = false) => {
+    const scenarios = list || [];
+    if (target === "backend" || (backendOnlyDataset && target === "both")) {
+      return scenarios.filter((s) => s.category === "api");
+    }
+    if (target === "frontend") return scenarios.filter(isPanelUiScenario);
+    return scenarios.filter((s) => s.category === "api" || isPanelUiScenario(s));
+  };
+
+  const datasetBackendOnly = isDatasetBackendOnly(dataset);
+
+  const uiEvidenceEnabled = runTarget === "frontend" || runTarget === "both";
+
   const runTests = async () => {
-    if (!dataset?.scenarios?.length) {
-      setMessage("Generate or open a dataset first.");
+    if (!dataset) {
+      setMessage("Import tests first.");
       setMessageType("err");
       return;
     }
 
-    const scenarios = dataset.scenarios;
+    let scenarios = filterScenariosForRunTarget(dataset.scenarios || [], runTarget, datasetBackendOnly);
+    let pairedUiAdded = 0;
+    if (!scenarios.length && dataset.sheetRows?.length && dataset.requirement) {
+      try {
+        const refreshed = await window.DevHelperApi.fetchJson(`/api/testing/datasets/${dataset.id}`);
+        if (refreshed.dataset?.scenarios?.length) {
+          setDataset(refreshed.dataset);
+          scenarios = filterScenariosForRunTarget(refreshed.dataset.scenarios, runTarget, isDatasetBackendOnly(refreshed.dataset));
+          setMessage(`Built ${scenarios.length} runnable scenarios from sheet rows.`);
+          setMessageType("ok");
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+    if (!datasetBackendOnly && (runTarget === "both" || runTarget === "frontend") && countUiScenarios(scenarios) === 0) {
+      const folders = dataset.postman?.selectedFolders || [];
+      if (folders.length) {
+        try {
+          const pair = await window.DevHelperApi.fetchJson("/api/testing/frontend-scenarios/pairs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ folders }),
+          });
+          const paired = pair.scenarios || [];
+          if (paired.length) {
+            pairedUiAdded = paired.length;
+            scenarios = filterScenariosForRunTarget(
+              [...(dataset.scenarios || []), ...paired],
+              runTarget,
+              datasetBackendOnly
+            );
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    if (!scenarios.length) {
+      const label = runTarget === "backend" ? "API" : runTarget === "frontend" ? "UI" : "API or UI";
+      setMessage(`No ${label} scenarios in this dataset for "${runTarget}" run.`);
+      setMessageType("err");
+      return;
+    }
+    const groups = groupScenariosForRun(scenarios, { apiFirst: runTarget === "both" || runTarget === "backend" });
+    const hasE2eBatch = groups.some((g) => g.type === "e2e_batch");
     const runId = `${dataset.id}_run_${Date.now()}`;
     const startedAt = new Date().toISOString();
     const results = [];
+    let stepIndex = 0;
 
     setLoading(true);
-    setRunResult(null);
-    setLiveResults([]);
-    setRunLog([]);
-    setCurrentScenario(null);
+    clearRunState();
+    liveLogCursorRef.current = 0;
     setActiveView("runner");
-    setMessage("Test run started — executing scenarios one by one…");
+    setMessage("Test run started…");
     setMessageType("info");
+    runControlRef.current = { runId, stop: false };
 
-    try {
-      for (let i = 0; i < scenarios.length; i += 1) {
-        const scenario = scenarios[i];
-        setCurrentScenario(scenario);
-        setRunProgress(`${i + 1} / ${scenarios.length}: ${scenario.id}`);
-        appendLog(`▶ ${scenario.id} — ${scenario.title}`);
-
-        const step = await window.DevHelperApi.fetchJson("/api/testing/run-step", {
+    const savePartialRun = async (results, note) => {
+      if (!results.length) return;
+      const summary = {
+        total: results.length,
+        passed: results.filter((r) => r.status === "passed").length,
+        failed: results.filter((r) => r.status === "failed").length,
+        skipped: results.filter((r) => r.status === "skipped").length,
+        withScreenshots: results.filter((r) => r.screenshots?.length).length,
+        durationMs: results.reduce((n, r) => n + (r.durationMs || 0), 0),
+        cancelled: true,
+      };
+      const run = {
+        runId,
+        datasetId: dataset.id,
+        datasetTitle: dataset.title,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        options: { skipLive, captureEvidence: uiEvidenceEnabled, showBrowser, runTarget, cancelled: true },
+        summary,
+        results,
+      };
+      try {
+        await window.DevHelperApi.fetchJson("/api/testing/run/complete", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          timeoutMs: 600000,
-          body: JSON.stringify({
-            runId,
-            scenario,
-            index: i + 1,
-            total: scenarios.length,
-            skipLive,
-            captureEvidence,
-            model,
-            provider,
-          }),
+          body: JSON.stringify({ run }),
         });
+      } catch {
+        /* ignore */
+      }
+      setRunResult(run);
+      setActiveView("results");
+      setMessage(note || `Stopped — ${summary.passed} passed · ${summary.failed} failed (partial run)`);
+      setMessageType("info");
+    };
 
-        const result = step.result;
+    try {
+      const needBatch = hasE2eBatch && !skipLive;
+      await assertTestingApiReady(needBatch ? ["e2e-batch", "run-step"] : ["run-step"]);
+
+      if (pairedUiAdded) {
+        appendLog(`▶ ${pairedUiAdded} paired UI test(s) — ${runTarget === "both" ? "API first, then Playwright" : "Playwright UI"}`);
+      }
+
+      for (const group of groups) {
+        if (shouldStopRun()) break;
+        if (group.type === "e2e_batch") {
+          const batchScenarios = group.scenarios;
+          appendLog(
+            `▶ E2E session (${batchScenarios.length} tests, one login) — live ${scriptHealLabel(aiScope)} + Playwright logs below`
+          );
+          setRunProgress(`E2E batch: 0 / ${batchScenarios.length}`);
+          setHealState({ phase: "running", log: ["Waiting for batch…"], attempts: [] });
+
+          const batch = await pollTestingJob(
+            "/api/testing/e2e-batch/start",
+            "/api/testing/e2e-batch/status",
+            {
+              runId,
+              scenarios: batchScenarios,
+              showBrowser: false,
+              captureEvidence: uiEvidenceEnabled,
+              runTarget,
+              datasetTitle: dataset.title,
+              model,
+              provider,
+            },
+            {
+              maxWaitMs: 600000,
+              pollMs: 1000,
+              shouldStop: shouldStopRun,
+              onTick: (st) => {
+                const lp = st.liveProgress;
+                if (lp?.currentStep) {
+                  setRunProgress(lp.currentStep);
+                } else {
+                  setRunProgress(`E2E batch… ${st.elapsedSeconds || 0}s`);
+                }
+                syncLiveRunProgress(lp, liveLogCursorRef, {
+                  appendLog,
+                  setHealState,
+                  elapsedSeconds: st.elapsedSeconds,
+                });
+              },
+            }
+          );
+
+          const streamedLive = liveLogCursorRef.current > 1;
+
+          if (batch?.heal) {
+            const h = batch.heal;
+            const strat = h.script?.strategyId || "ai_script";
+            const healLbl = scriptHealLabel(aiScope);
+            const aiNote = h.aiGenerated
+              ? ` · ${healLbl} repaired nav`
+              : h.cached
+                ? " · cached replay"
+                : "";
+            if (!streamedLive) {
+              appendLog(
+                `✓ Nav script${h.agentAttempts ? ` (${h.agentAttempts} attempt(s))` : ""}: ${strat}${aiNote}`
+              );
+              if (h.rationale) appendLog(`  Plan: ${String(h.rationale).slice(0, 200)}`);
+            }
+            setHealState({
+              phase: h.ok === false ? "failed" : "done",
+              script: h.script,
+              attempts: h.attempts || [],
+              log: healAttemptsToLog(h.attempts || []),
+              error: h.error,
+            });
+          }
+
+          if (batch?.scenarioHeal && !streamedLive) {
+            const sh = batch.scenarioHeal;
+            const patchedIds = (sh.patches || []).map((p) => p.scenarioId).filter(Boolean);
+            if (sh.ok) {
+              appendLog(
+                `✓ Scenario e2eFlow heal${sh.attempts ? ` (${sh.attempts} attempt(s))` : ""}${patchedIds.length ? `: ${patchedIds.join(", ")}` : ""}`
+              );
+            } else if (sh.attempts) {
+              appendLog(`✗ Scenario e2eFlow heal failed after ${sh.attempts} attempt(s)`);
+            }
+            if (sh.rationale) appendLog(`  Scenario heal: ${String(sh.rationale).slice(0, 220)}`);
+            for (const p of sh.patches || []) {
+              if (p.scenarioId && p.e2eFlow) {
+                appendLog(`  · ${p.scenarioId} → ${p.e2eFlow}${p.reason ? ` (${p.reason})` : ""}`);
+              }
+            }
+          }
+
+          if (!batch?.ok && batch?.error) {
+            appendLog(`  ✗ Batch warning: ${batch.error}`);
+            if (batch.heal?.ok === false) {
+              throw new Error(batch.error || "Navigation self-heal failed");
+            }
+          }
+
+          for (const scenario of batchScenarios) {
+            stepIndex += 1;
+            const result =
+              (batch.results || []).find((r) => r.scenarioId === scenario.id) || {
+                scenarioId: scenario.id,
+                title: scenario.title,
+                status: "failed",
+                error: batch.error || "Missing batch result",
+              };
+            results.push(result);
+            setLiveResults([...results]);
+            const steps = result.actual?.stepsRun || [];
+            if (steps.length) {
+              steps.forEach((line) => appendLog(`    ${line}`));
+            }
+            if (result.actual?.pageUrl) {
+              appendLog(`    URL: ${result.actual.pageUrl}`);
+            }
+            if (result.actual?.error) {
+              appendLog(`    Error: ${result.actual.error}`);
+            }
+            console.log("[TestingPanel] E2E result", scenario.id, result.status, result.actual);
+            logScenarioResult(scenario, result);
+          }
+          setHealState(null);
+          continue;
+        }
+
+        const scenario = group.scenario;
+        stepIndex += 1;
+        const result = await runSingleScenario(scenario, runId, stepIndex, scenarios.length);
         results.push(result);
         setLiveResults([...results]);
-
-        const shotNote = result.screenshots?.length
-          ? ` · ${result.screenshots.length} screenshot(s)`
-          : result.evidenceError
-            ? ` · no screenshot (${result.evidenceError})`
-            : "";
-        appendLog(
-          `  ${result.status === "passed" ? "✓" : result.status === "failed" ? "✗" : "○"} ${scenario.id} ${result.status}${shotNote} (${Math.round((result.durationMs || 0) / 1000)}s)`
-        );
-        if (result.assertions?.failures?.length) {
-          result.assertions.failures.forEach((f) => appendLog(`    · ${f}`));
-        }
-        if (result.assertions?.skipped?.length) {
-          result.assertions.skipped.slice(0, 4).forEach((s) => appendLog(`    ○ ${s}`));
-          if (result.assertions.skipped.length > 4) {
-            appendLog(`    ○ …and ${result.assertions.skipped.length - 4} relaxed checks`);
-          }
-        }
+        logScenarioResult(scenario, result);
       }
 
       const summary = {
@@ -208,7 +942,7 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
         datasetTitle: dataset.title,
         startedAt,
         finishedAt: new Date().toISOString(),
-        options: { skipLive, captureEvidence },
+        options: { skipLive, captureEvidence, showBrowser },
         summary,
         results,
       };
@@ -227,24 +961,183 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
       );
       setMessageType(summary.failed > 0 ? "info" : "ok");
     } catch (err) {
-      setMessage(String(err));
-      setMessageType("err");
-      appendLog(`ERROR: ${err}`);
+      if (isStopError(err)) {
+        appendLog("■ Run stopped by user");
+        await savePartialRun(results, "Test run stopped — partial results saved");
+      } else {
+        setMessage(String(err));
+        setMessageType("err");
+        appendLog(`ERROR: ${err}`);
+        if (results.length) await savePartialRun(results, `Error — partial results saved (${results.length} steps)`);
+      }
     } finally {
+      runControlRef.current = { runId: null, stop: false };
       setLoading(false);
       setRunProgress("");
       setCurrentScenario(null);
+      setHealState(null);
     }
   };
 
   const downloadRunJson = () => {
-    if (!runResult) return;
-    const blob = new Blob([JSON.stringify(runResult, null, 2)], { type: "application/json" });
+    if (!runForCurrentDataset) return;
+    const blob = new Blob([JSON.stringify(runForCurrentDataset, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `test-run-${runResult.runId}.json`;
+    a.download = `test-run-${runForCurrentDataset.runId}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
+  };
+
+  const generateFromDocs = async (source) => {
+    const name = String(source.moduleName || "").trim();
+    const prd = source.prd || "";
+    const userManual = source.userManual || source.user_manual || "";
+    if (!name || (!prd && !userManual)) {
+      setMessage("Module name and PRD or user manual are required.");
+      setMessageType("err");
+      return;
+    }
+    if (!configured) {
+      setMessage("Configure an AI API key in API Settings first.");
+      setMessageType("err");
+      return;
+    }
+
+    setLoading(true);
+    setMessage(`Generating test cases from ${name} documentation…`);
+    setMessageType("info");
+    setDataset(null);
+
+    try {
+      const data = await window.DevHelperApi.startAndPollTestcaseGen(
+        {
+          moduleName: name,
+          prd,
+          userManual,
+          description: source.description || "",
+          sessionId: source.sessionId || "",
+          save: true,
+          options: {
+            minScenarios: form.minScenarios || 15,
+            includeLivePanel: form.includeLivePanel,
+            backendOnly: Boolean(source.backendOnly),
+          },
+        },
+        {
+          onProgress: (_st, sec) => {
+            setMessage(`Generating test cases from ${name} documentation… (${sec}s)`);
+          },
+        }
+      );
+      const ds = await resolveDatasetPayload(data.dataset);
+      if (!applyImportedDataset(ds)) {
+        throw new Error("Generated dataset is empty.");
+      }
+    } catch (err) {
+      setMessage(String(err));
+      setMessageType("err");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const generateFromBrowserDocs = () => {
+    const saved = window.DevHelperStorage?.loadJson(DOCS_KEY, null);
+    if (!saved?.prd && !saved?.userManual) {
+      setMessage("No PRD/manual in Module Docs — generate documentation first.");
+      setMessageType("err");
+      return;
+    }
+    generateFromDocs({
+      moduleName: saved.moduleName,
+      prd: saved.prd,
+      userManual: saved.userManual,
+      description: saved.description,
+      sessionId: saved.sessionId,
+      backendOnly: saved.backendOnly,
+    });
+  };
+
+  const runFullPipelineFromDocs = async () => {
+    const saved = window.DevHelperStorage?.loadJson(DOCS_KEY, null);
+    if (!saved?.prd && !saved?.userManual) {
+      setMessage("No PRD/manual in Module Docs — add or generate documentation first.");
+      setMessageType("err");
+      return;
+    }
+    if (!configured) {
+      setMessage("Configure an AI API key in API Settings first.");
+      setMessageType("err");
+      return;
+    }
+
+    setLoading(true);
+    clearRunState();
+    liveLogCursorRef.current = 0;
+    setActiveView("runner");
+    setMessage("Pipeline: generating test cases from PRD/manual, then running E2E…");
+    setMessageType("info");
+
+    try {
+      await assertTestingApiReady(["e2e-batch", "run-step"]);
+      const runId = `pipeline_${Date.now()}`;
+      const result = await pollTestingJob(
+        "/api/testing/pipeline/from-docs/start",
+        "/api/testing/pipeline/from-docs/status",
+        {
+          runId,
+          moduleName: saved.moduleName,
+          prd: saved.prd,
+          userManual: saved.userManual,
+          description: saved.description || "",
+          sessionId: saved.sessionId || "",
+          showBrowser,
+          captureEvidence,
+          model,
+          provider,
+          options: {
+            minScenarios: form.minScenarios || 12,
+            includeLivePanel: !saved.backendOnly,
+            backendOnly: Boolean(saved.backendOnly),
+          },
+        },
+        {
+          maxWaitMs: 900000,
+          pollMs: 1000,
+          onTick: (st) => {
+            setRunProgress(st.liveProgress?.currentStep || `Pipeline… ${st.elapsedSeconds || 0}s`);
+            syncLiveRunProgress(st.liveProgress, liveLogCursorRef, {
+              appendLog,
+              setHealState,
+              elapsedSeconds: st.elapsedSeconds,
+            });
+          },
+        }
+      );
+
+      if (result?.dataset) applyImportedDataset(result.dataset);
+      const batch = result?.batch;
+      if (batch?.results?.length) {
+        const passed = batch.results.filter((r) => r.status === "passed").length;
+        const failed = batch.results.filter((r) => r.status === "failed").length;
+        setMessage(
+          `Pipeline done — ${passed} passed · ${failed} failed (${result.e2eCount || batch.results.length} E2E)`
+        );
+        setActiveView("results");
+      } else if (result?.error) {
+        setMessage(result.error);
+        setMessageType("err");
+      } else {
+        setMessage("Pipeline finished — see dataset and runner logs.");
+        setMessageType("info");
+      }
+    } catch (err) {
+      setMessage(String(err));
+      setMessageType("err");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const generate = async () => {
@@ -277,12 +1170,16 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
           save: true,
         }),
       });
+      clearRunState();
       setDataset(data.dataset);
-      setRunResult(null);
+      const templateNote =
+        data.dataset?.generatedBy === "local-template"
+          ? ` · ${data.dataset.creditsNote || "built-in order E2E template (no OpenRouter credits used)"}`
+          : "";
       setMessage(
-        `Generated ${data.dataset.scenarioCount} scenarios · saved as ${data.dataset.id}`
+        `Generated ${data.dataset.scenarioCount} scenarios · saved as ${data.dataset.id}${templateNote}`
       );
-      setMessageType("ok");
+      setMessageType(data.dataset?.generatedBy === "local-template" ? "info" : "ok");
       setActiveView("scenarios");
       const list = await window.DevHelperApi.fetchJson("/api/testing/datasets");
       setSavedList(list.datasets || []);
@@ -299,13 +1196,32 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
     }
   };
 
-  const loadSaved = async (id) => {
+  const loadSaved = (id) => openDataset(id);
+
+  const refreshSavedList = async () => {
+    const list = await window.DevHelperApi.fetchJson("/api/testing/datasets");
+    setSavedList(list.datasets || []);
+  };
+
+  const deleteSaved = async (id) => {
+    if (!confirm("Delete this test dataset and all saved runs for it?")) return;
     setLoading(true);
-    setMessage("");
     try {
-      const data = await window.DevHelperApi.fetchJson(`/api/testing/datasets/${id}`);
-      setDataset(data.dataset);
-      setActiveView("scenarios");
+      const result = await window.DevHelperApi.fetchJson("/api/testing/datasets/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (dataset?.id === id) {
+        setDataset(null);
+        clearRunState();
+        setActiveView("scenarios");
+      }
+      await refreshSavedList();
+      const runsNote =
+        result.runsRemoved > 0 ? ` (${result.runsRemoved} run${result.runsRemoved === 1 ? "" : "s"} removed)` : "";
+      setMessage(`Dataset deleted${runsNote}.`);
+      setMessageType("ok");
     } catch (err) {
       setMessage(String(err));
       setMessageType("err");
@@ -314,19 +1230,17 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
     }
   };
 
-  const deleteSaved = async (id) => {
-    if (!confirm("Delete this saved test dataset?")) return;
+  const deleteRun = async (runId) => {
+    if (!confirm("Delete this saved test run? Screenshots and recordings will be removed.")) return;
     setLoading(true);
     try {
-      await window.DevHelperApi.fetchJson("/api/testing/datasets/delete", {
+      await window.DevHelperApi.fetchJson("/api/testing/runs/delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({ runId }),
       });
-      if (dataset?.id === id) setDataset(null);
-      const list = await window.DevHelperApi.fetchJson("/api/testing/datasets");
-      setSavedList(list.datasets || []);
-      setMessage("Dataset deleted.");
+      if (runForCurrentDataset?.runId === runId) clearRunState();
+      setMessage("Test run deleted.");
       setMessageType("ok");
     } catch (err) {
       setMessage(String(err));
@@ -334,6 +1248,14 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const clearRunResults = () => {
+    if (!confirm("Clear run log and results from this view? (Saved run file is kept on disk.)")) return;
+    clearRunState();
+    setActiveView("scenarios");
+    setMessage("Run results cleared from view.");
+    setMessageType("info");
   };
 
   const downloadJson = () => {
@@ -366,8 +1288,452 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
     window.DevHelperStorage?.saveJson(TESTING_KEY, { form: DEFAULT_FORM });
   };
 
+  const importDatasetFromJson = async () => {
+    const raw = importDatasetText.trim();
+    if (!raw) {
+      setMessage("Paste scenario dataset JSON first.");
+      setMessageType("err");
+      return;
+    }
+    setLoading(true);
+    try {
+      const parsed = JSON.parse(raw);
+      const data = await window.DevHelperApi.fetchJson("/api/testing/datasets/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        timeoutMs: 30000,
+        body: JSON.stringify({ dataset: parsed, save: true }),
+      });
+      applyImportedDataset(data.dataset);
+      setImportDatasetText("");
+    } catch (err) {
+      setMessage(String(err.message || err));
+      setMessageType("err");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const parseOptionalJson = (raw, label) => {
+    const t = String(raw || "").trim();
+    if (!t) return null;
+    try {
+      return JSON.parse(t);
+    } catch {
+      throw new Error(`Invalid ${label} JSON`);
+    }
+  };
+
+  const importPostmanCollectionOnly = async () => {
+    const cid = postmanCollectionId.trim();
+    if (!cid) {
+      setMessage("Set POSTMAN_COLLECTION_ID in .env.");
+      setMessageType("err");
+      return;
+    }
+    if (!postmanSelectedFolders.length) {
+      setMessage("Select at least one test group.");
+      setMessageType("err");
+      return;
+    }
+    setLoading(true);
+    try {
+      const data = await window.DevHelperApi.fetchJson("/api/testing/postman/import-collection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        timeoutMs: 120000,
+        body: JSON.stringify({
+          collectionId: cid,
+          folders: postmanSelectedFolders,
+          frontendNotes: frontendNotes.trim() || undefined,
+          save: true,
+        }),
+      });
+      let merged = data.dataset;
+      const customUiCount = (merged.scenarios || []).filter(
+        (s) => s.tags?.includes("frontend-custom")
+      ).length;
+      if (includeUiOnImport) {
+        try {
+          const ui = await window.DevHelperApi.fetchJson("/api/testing/seed/rate-calculator", {
+            method: "POST",
+          });
+          const uiScenarios = ui.dataset?.scenarios || [];
+          const apiCount = (merged.scenarios || []).filter((s) => s.category === "api").length;
+          const uiCount =
+            (merged.scenarios || []).filter((s) => s.category === "e2e").length + uiScenarios.length;
+          merged = {
+            ...merged,
+            scenarios: [...(merged.scenarios || []), ...uiScenarios],
+            scenarioCount: (merged.scenarios?.length || 0) + uiScenarios.length,
+            summary: `${apiCount} API + ${uiCount} UI scenario(s)`,
+          };
+          await window.DevHelperApi.fetchJson("/api/testing/scripts/nav", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              script: {
+                version: 1,
+                module: "Rate Calculator",
+                rationale: "Ctrl+B Quick Search",
+                navSteps: [
+                  { op: "dismiss_overlays" },
+                  { op: "hotkey", keys: "Control+b" },
+                  { op: "wait", ms: 100 },
+                  { op: "fill_placeholder", placeholder: "Quick Search", text: "rate calculator" },
+                  { op: "click_text", text: "Rate Calculator", contains: "Tools" },
+                  { op: "wait_for_text", text: "pincode", timeout_ms: 2500 },
+                ],
+                verifyTexts: ["origin pincode", "calculate"],
+              },
+            }),
+          });
+          setNavScriptInfo("nav script saved for UI tests");
+        } catch (uiErr) {
+          setMessage(
+            `Imported API scenarios; Rate Calculator UI add-on skipped: ${uiErr.message || uiErr}`
+          );
+          setMessageType("info");
+        }
+      }
+      const hasUi =
+        includeUiOnImport ||
+        customUiCount > 0 ||
+        countUiScenarios(merged.scenarios) > 0;
+      if (includeUiOnImport || customUiCount > 0) {
+        const saved = await window.DevHelperApi.fetchJson("/api/testing/datasets/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dataset: merged, save: true }),
+        });
+        merged = saved.dataset || merged;
+      }
+      applyImportedDataset(merged);
+      setRunTarget(hasUi ? "both" : "backend");
+      setMessage(`Imported ${merged.scenarios?.length || 0} scenario(s).`);
+      setMessageType("ok");
+    } catch (err) {
+      const text = String(err.message || err);
+      setMessage(
+        text.includes("API route not found")
+          ? `${text} — restart the server (npm start) and hard-refresh the browser.`
+          : text
+      );
+      setMessageType("err");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runFullHybridWorkflow = async () => {
+    setLoading(true);
+    clearRunState();
+    setActiveView("runner");
+    setMessage("Hybrid pipeline: Postman API + UI scripts → Run all…");
+    setMessageType("info");
+    try {
+      await assertTestingApiReady(["hybrid-pipeline", "e2e-batch", "run-step", "testing-setup"]);
+      let e2eDataset = null;
+      let navScript = null;
+      try {
+        e2eDataset = parseOptionalJson(importDatasetText, "E2E dataset");
+        navScript = parseOptionalJson(importNavText, "nav script");
+      } catch (err) {
+        setMessage(err.message);
+        setMessageType("err");
+        setLoading(false);
+        return;
+      }
+      if (postmanMode === "import" && !postmanCollectionId.trim() && !setupStatus?.items?.find((i) => i.id === "postman_collection")?.ok) {
+        setMessage("POSTMAN_COLLECTION_ID required in .env (import mode), or switch to agent/skip.");
+        setMessageType("err");
+        setLoading(false);
+        return;
+      }
+      if (postmanMode === "import" && !postmanSelectedFolders.length) {
+        setMessage("Select at least one API test group before running hybrid workflow.");
+        setMessageType("err");
+        setLoading(false);
+        return;
+      }
+      if (postmanMode === "agent" && !postmanAgentRequirement.trim()) {
+        setMessage("Describe APIs for Postman MCP agent, or use import mode with collection ID.");
+        setMessageType("err");
+        setLoading(false);
+        return;
+      }
+      if (!e2eDataset && postmanMode === "skip") {
+        setMessage("Paste E2E scenario JSON or enable Postman import/agent.");
+        setMessageType("err");
+        setLoading(false);
+        return;
+      }
+      const result = await pollTestingJob(
+        "/api/testing/hybrid-pipeline/start",
+        "/api/testing/hybrid-pipeline/status",
+        {
+          postmanMode,
+          collectionId: postmanCollectionId.trim() || undefined,
+          postmanFolders: postmanSelectedFolders,
+          postmanRequirement: postmanAgentRequirement.trim() || undefined,
+          e2eDataset,
+          navScript,
+          runTests: true,
+          showBrowser,
+          captureEvidence,
+          skipLive,
+          model,
+          provider,
+        },
+        {
+          maxWaitMs: 900000,
+          shouldStop: shouldStopRun,
+          onTick: (st) => {
+            if (st.progress?.phase) setRunProgress(`Pipeline: ${st.progress.phase}`);
+          },
+        }
+      );
+      if (result?.dataset) applyImportedDataset(result.dataset);
+      if (result?.run) {
+        setRunResult(result.run);
+        setActiveView("results");
+      }
+      const sum = result?.summary || result?.run?.summary;
+      setMessage(
+        result?.ok
+          ? `Hybrid run passed — ${sum?.passed ?? "?"} passed, ${sum?.failed ?? 0} failed`
+          : `Hybrid run finished — ${sum?.failed ?? "?"} failed. Collection: ${result?.collectionId || "—"}`
+      );
+      setMessageType(result?.ok ? "ok" : "err");
+      window.DevHelperApi.fetchJson("/api/testing/setup").then(setSetupStatus).catch(() => {});
+    } catch (err) {
+      if (!isStopError(err)) {
+        setMessage(String(err.message || err));
+        setMessageType("err");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const generatePostmanApiTests = async () => {
+    const requirement = postmanAgentRequirement.trim();
+    if (!requirement) {
+      setMessage("Describe the backend APIs to test first.");
+      setMessageType("err");
+      return;
+    }
+    if (!configured) {
+      setMessage("Configure an AI API key in API Settings first.");
+      setMessageType("err");
+      return;
+    }
+    setLoading(true);
+    setMessage("AI is commanding Postman MCP to create collection + tests…");
+    setMessageType("info");
+    try {
+      const data = await window.DevHelperApi.fetchJson("/api/testing/postman-agent/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        timeoutMs: 600000,
+        body: JSON.stringify({
+          requirement,
+          options: { minScenarios: 6 },
+        }),
+      });
+      applyImportedDataset(data.dataset);
+      setPostmanAgentRequirement("");
+      const coll = data.dataset?.postman?.collectionId;
+      setMessage(
+        coll
+          ? `Created API tests — Postman collection ${coll}. Run all with API_RUN_BACKEND=postman-mcp.`
+          : "Created API test dataset from Postman MCP."
+      );
+      setMessageType("ok");
+    } catch (err) {
+      setMessage(String(err.message || err));
+      setMessageType("err");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const importNavScriptFromJson = async () => {
+    const raw = importNavText.trim();
+    if (!raw) {
+      setMessage("Paste nav script JSON first.");
+      setMessageType("err");
+      return;
+    }
+    setLoading(true);
+    try {
+      const parsed = JSON.parse(raw);
+      const data = await window.DevHelperApi.fetchJson("/api/testing/scripts/nav", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        timeoutMs: 15000,
+        body: JSON.stringify({ script: parsed }),
+      });
+      const n = data.script?.navSteps?.length ?? 0;
+      setNavScriptInfo(`${n} nav step(s) saved → output/runtime/e2e-ai-script.json`);
+      setImportNavText("");
+      setMessage(`Nav script imported (${n} steps). Batch runner replays this before any AI heal.`);
+      setMessageType("ok");
+    } catch (err) {
+      setMessage(String(err.message || err));
+      setMessageType("err");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadSampleNavScript = () => {
+    setImportNavText(
+      JSON.stringify(
+        {
+          version: 1,
+          module: "Rate Calculator",
+          rationale: "Ctrl+B Quick Search",
+          navSteps: [
+            { op: "dismiss_overlays" },
+            { op: "hotkey", keys: "Control+b" },
+            { op: "wait", ms: 100 },
+            { op: "fill_placeholder", placeholder: "Quick Search", text: "rate calculator" },
+            { op: "click_text", text: "Rate Calculator", contains: "Tools" },
+            { op: "wait_for_text", text: "pincode", timeout_ms: 2500 },
+          ],
+          verifyTexts: ["origin pincode", "calculate"],
+        },
+        null,
+        2
+      )
+    );
+  };
+
   return (
     <div>
+      {healState && (
+        <div className="heal-modal-backdrop" role="dialog" aria-label="Self-healing navigation">
+          <div className="heal-modal card">
+            <h3>Self-healing navigation ({scriptHealLabel(aiScope)})</h3>
+            <p className="hint">
+              Dashboard → <strong>Ctrl+B</strong> → search <em>rate calculator</em> → select{" "}
+              <em>Tools → Rate Calculator</em> (sidebar fallback if search fails)
+            </p>
+            {healState.elapsedSeconds != null && (
+              <p className="hint">Elapsed: {healState.elapsedSeconds}s</p>
+            )}
+            {healState.phase === "running" && (
+              <div className="alert alert-info">Trying navigation strategies…</div>
+            )}
+            {healState.phase === "done" && (
+              <div className="alert alert-success">Navigation script saved — running tests next</div>
+            )}
+            {healState.phase === "failed" && (
+              <div className="alert alert-error">{healState.error || "Heal failed"}</div>
+            )}
+            <div className="run-console heal-console">
+              {(healState.log || []).map((line, i) => (
+                <div key={i} className="run-console-line">
+                  {line}
+                </div>
+              ))}
+            </div>
+            {loading && (
+              <div className="toolbar" style={{ marginTop: 12 }}>
+                <button className="danger" type="button" onClick={stopTests}>
+                  Stop run
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <h2>Import tests</h2>
+        <p className="hint" style={{ marginTop: 4, marginBottom: 12 }}>
+          Collection from <code>.env</code>. Pick groups → Import → Run below.
+        </p>
+        {postmanGroupsLoading && <p className="hint">Loading test groups…</p>}
+        {postmanGroups.length > 0 ? (
+          <div className="checkbox-grid" style={{ marginBottom: 12 }}>
+            {postmanGroups.map((g) => (
+              <label key={g.id} className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={postmanSelectedFolders.includes(g.id)}
+                  onChange={() => togglePostmanFolder(g.id)}
+                />
+                <strong>{g.label}</strong>
+                <span className="hint"> ({g.requestCount})</span>
+              </label>
+            ))}
+          </div>
+        ) : (
+          !postmanGroupsLoading && (
+            <button className="muted" type="button" onClick={() => loadPostmanGroups()} disabled={loading}>
+              Load test groups
+            </button>
+          )
+        )}
+        <label className="field" style={{ marginTop: 12 }}>
+          Frontend-only tests (no API) — one per line
+        </label>
+        <textarea
+          value={frontendNotes}
+          onChange={(e) => setFrontendNotes(e.target.value)}
+          placeholder={`Shopify integration — verify connection status badge\nNew Orders — filter by today\nChannels — open integration settings`}
+          style={{ minHeight: 88, fontFamily: "inherit", fontSize: 13 }}
+        />
+        <label className="checkbox-row" style={{ margin: "12px 0" }}>
+          <input
+            type="checkbox"
+            checked={includeUiOnImport}
+            onChange={(e) => setIncludeUiOnImport(e.target.checked)}
+          />
+          Also include sample Rate Calculator UI tests
+        </label>
+        <button
+          className="primary"
+          type="button"
+          onClick={importPostmanCollectionOnly}
+          disabled={loading || !postmanSelectedFolders.length}
+        >
+          Import
+        </button>
+      </div>
+
+      {!scriptFirst && (
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <h2>From PRD + user manual</h2>
+            <p className="hint" style={{ marginTop: 4 }}>
+              Optional AI path: LLM reads PRD/manual → test cases → E2E run (set TESTCASE_BACKEND=docs or docs-mcp)
+            </p>
+          </div>
+        </div>
+        <div className="toolbar">
+          <button className="primary" onClick={generateFromBrowserDocs} disabled={loading || !configured}>
+            {loading && message.includes("documentation") ? "Generating…" : "Generate test cases"}
+          </button>
+          <button
+            className="primary"
+            onClick={runFullPipelineFromDocs}
+            disabled={loading || !configured}
+            title="Generate from Module Docs draft then run all E2E scenarios"
+          >
+            {loading && message.includes("Pipeline") ? "Pipeline running…" : "Generate + Run all E2E"}
+          </button>
+        </div>
+        <p className="hint" style={{ marginTop: 8 }}>
+          Paste or generate PRD + manual in <strong>Module Docs</strong> first.
+        </p>
+      </div>
+      )}
+
+      {!scriptFirst && (
       <div className="card">
         <div className="card-header">
           <div>
@@ -405,8 +1771,15 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
                     type="checkbox"
                     checked={form.testAreas.includes(a.id)}
                     onChange={() => toggleList("testAreas", a.id)}
+                    disabled={a.id === "chat" && aiScope && !aiScope.chatEnabled}
                   />
                   {a.label}
+                  {a.id === "chat" && aiScope && !aiScope.chatEnabled && (
+                    <span className="hint">
+                      {" "}
+                      (disabled — add <code>chat</code> to <code>AI_SCOPE</code> in .env)
+                    </span>
+                  )}
                 </label>
               ))}
             </div>
@@ -496,6 +1869,14 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
               />
               Offline / mock / missing-config cases
             </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={form.qaSheetFormat === true}
+                onChange={(e) => setField("qaSheetFormat", e.target.checked)}
+              />
+              Google Sheet QA format (flow-based TCs: Component → Integration → E2E)
+            </label>
           </div>
         )}
 
@@ -507,7 +1888,31 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
             Clear
           </button>
         </div>
+        {aiScope && (
+          <p className="hint" style={{ marginTop: 10 }}>
+            {aiScope.limitedMessage}
+            {aiScope.backends?.scriptDebug === "mcp" &&
+              " Self-heal: Playwright MCP (nav + scenario e2eFlow on failure — no OpenRouter)."}
+            {aiScope.backends?.scriptDebug === "llm" &&
+              " Self-heal: OpenRouter LLM on nav/scenario failure."}
+            {(aiScope.backends?.testcaseGen === "scripts" ||
+              aiScope.backends?.testcaseGen === "import" ||
+              aiScope.backends?.testcaseGen === "none") &&
+              " Test cases: import your scripts — no AI generation."}
+            {aiScope.backends?.testcaseGen === "docs-mcp" && " Test cases: PRD/manual + Playwright MCP."}
+            {(aiScope.backends?.testcaseGen === "docs" ||
+              aiScope.backends?.testcaseGen === "docs-llm") &&
+              " Test cases: single LLM pass from PRD/manual."}
+            {(aiScope.backends?.testcaseGen === "postman-mcp" ||
+              aiScope.backends?.testcaseGen === "postman-agent") &&
+              " Test cases: AI creates Postman collection via MCP."}
+            {aiScope.backends?.testcaseGen === "postman" && " Test cases: read existing Postman collection."}
+            {aiScope.backends?.testcaseGenLabel && ` (${aiScope.backends.testcaseGenLabel})`}
+            {!aiScope.chatEnabled && " Chat scenarios are skipped during test runs."}
+          </p>
+        )}
       </div>
+      )}
 
       {message && (
         <div
@@ -520,21 +1925,27 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
       )}
 
       {savedList.length > 0 && (
-        <div className="card">
-          <div className="card-header">
-            <h3>Saved datasets ({savedList.length})</h3>
-          </div>
-          <ul className="report-list">
+        <details className="card" style={{ marginBottom: 12 }} open={savedList.length <= 3}>
+          <summary className="hint" style={{ cursor: "pointer" }}>
+            Saved test datasets ({savedList.length})
+          </summary>
+          <ul className="report-list" style={{ marginTop: 8 }}>
             {savedList.map((d) => (
               <li key={d.id} className="report-item">
                 <div className="report-item-info">
                   <div className="report-item-title">{d.title}</div>
                   <div className="report-item-meta">
-                    {d.scenarioCount} scenarios · {new Date(d.createdAt).toLocaleString()}
+                    {d.scenarioCount} scenarios
+                    {dataset?.id === d.id ? " · open" : ""}
                   </div>
                 </div>
                 <div className="report-item-actions">
-                  <button className="primary" onClick={() => loadSaved(d.id)}>
+                  <button
+                    type="button"
+                    className="muted"
+                    onClick={() => loadSaved(d.id)}
+                    disabled={loading}
+                  >
                     Open
                   </button>
                   <button className="danger" onClick={() => deleteSaved(d.id)} disabled={loading}>
@@ -544,7 +1955,7 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
               </li>
             ))}
           </ul>
-        </div>
+        </details>
       )}
 
       {dataset && (
@@ -555,55 +1966,112 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
               <p className="hint" style={{ marginTop: 4 }}>
                 {dataset.summary}
               </p>
+              {dataset.sourceDocs?.moduleName && (
+                <p className="hint" style={{ marginTop: 4 }}>
+                  Source: PRD + manual for <strong>{dataset.sourceDocs.moduleName}</strong>
+                  {dataset.sourceDocs.sessionId ? ` · ${dataset.sourceDocs.sessionId}` : ""}
+                  {datasetBackendOnly ? " · backend/API only" : ""}
+                </p>
+              )}
             </div>
-            <div className="toolbar">
+            <div className="toolbar" style={{ flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+              <span className="hint" style={{ marginRight: 4 }}>
+                Run:
+              </span>
+              {[
+                {
+                  id: "backend",
+                  label: `Backend (${countApiScenarios(dataset.scenarios)})`,
+                },
+                ...(!datasetBackendOnly
+                  ? [
+                      {
+                        id: "frontend",
+                        label: `Frontend (${effectiveUiCount(dataset.scenarios, dataset.postman?.selectedFolders)})`,
+                      },
+                    ]
+                  : []),
+                {
+                  id: "both",
+                  label: datasetBackendOnly
+                    ? `Both (${countApiScenarios(dataset.scenarios)})`
+                    : `Both (${
+                        countApiScenarios(dataset.scenarios) +
+                        effectiveUiCount(dataset.scenarios, dataset.postman?.selectedFolders)
+                      })`,
+                },
+              ].map((opt) => (
+                <label key={opt.id} className="checkbox-row" style={{ marginRight: 8 }}>
+                  <input
+                    type="radio"
+                    name="runTarget"
+                    checked={runTarget === opt.id}
+                    onChange={() => setRunTarget(opt.id)}
+                    disabled={loading}
+                  />
+                  {opt.label}
+                </label>
+              ))}
               <button className="primary" onClick={runTests} disabled={loading}>
-                {loading && runProgress ? runProgress : loading ? "Running…" : "Run tests in UI"}
+                {loading && runProgress ? runProgress : loading ? "Running…" : "Run"}
               </button>
-              <button className="muted" onClick={downloadJson}>
-                Download dataset
-              </button>
-              {runResult && (
-                <button className="muted" onClick={downloadRunJson}>
-                  Download results
+              {loading && (
+                <button className="danger" onClick={stopTests} type="button">
+                  Stop
                 </button>
               )}
-              <button className="muted" onClick={copyMarkdown}>
-                Copy markdown
+              <button
+                className="danger"
+                type="button"
+                onClick={() => deleteSaved(dataset.id)}
+                disabled={loading}
+                title="Remove dataset and all saved runs"
+              >
+                Delete dataset
               </button>
             </div>
           </div>
 
-          <label className="checkbox-row" style={{ marginTop: 8 }}>
-            <input
-              type="checkbox"
-              checked={captureEvidence}
-              onChange={(e) => setCaptureEvidence(e.target.checked)}
-              disabled={loading}
-            />
-            Capture panel screenshot for every test (Playwright evidence)
-          </label>
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={skipLive}
-              onChange={(e) => setSkipLive(e.target.checked)}
-              disabled={loading}
-            />
-            Skip live Chat browse (faster API-only assertions; evidence screenshot still captured)
-          </label>
+          <p className="hint" style={{ marginTop: 8 }}>
+            {datasetBackendOnly
+              ? "Backend-only service — API scenarios only (no panel UI runs)."
+              : "Backend = API only. Frontend / Both = screenshots + screen recording (headless). API ~1 min/group · UI ~1–3 min/test."}
+          </p>
 
-          {(runResult || liveResults.length > 0) && (
+          {(runForCurrentDataset || liveForCurrentDataset.length > 0) && (
+            <div className="toolbar" style={{ marginTop: 10, flexWrap: "wrap", gap: 8 }}>
+              <button className="muted" type="button" onClick={clearRunResults} disabled={loading}>
+                Clear results
+              </button>
+              {runForCurrentDataset && (
+                <>
+                  <button className="muted" type="button" onClick={downloadRunJson} disabled={loading}>
+                    Download run JSON
+                  </button>
+                  <button
+                    className="danger"
+                    type="button"
+                    onClick={() => deleteRun(runForCurrentDataset.runId)}
+                    disabled={loading}
+                  >
+                    Delete run
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {(runForCurrentDataset || liveForCurrentDataset.length > 0) && (
             <div className="run-summary">
               {(() => {
                 const s =
-                  runResult?.summary || {
-                    passed: liveResults.filter((r) => r.status === "passed").length,
-                    failed: liveResults.filter((r) => r.status === "failed").length,
-                    skipped: liveResults.filter((r) => r.status === "skipped").length,
-                    withScreenshots: liveResults.filter((r) => r.screenshots?.length).length,
-                    total: liveResults.length,
-                    durationMs: liveResults.reduce((n, r) => n + (r.durationMs || 0), 0),
+                  runForCurrentDataset?.summary || {
+                    passed: liveForCurrentDataset.filter((r) => r.status === "passed").length,
+                    failed: liveForCurrentDataset.filter((r) => r.status === "failed").length,
+                    skipped: liveForCurrentDataset.filter((r) => r.status === "skipped").length,
+                    withScreenshots: liveForCurrentDataset.filter((r) => r.screenshots?.length).length,
+                    total: liveForCurrentDataset.length,
+                    durationMs: liveForCurrentDataset.reduce((n, r) => n + (r.durationMs || 0), 0),
                   };
                 return (
                   <>
@@ -633,62 +2101,72 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
             </div>
           )}
 
-          <div className="coverage-row">
-            {Object.entries(dataset.coverageMatrix?.byCategory || {}).map(([k, v]) => (
-              <span key={k} className="badge badge-muted">
-                {k}: {v}
-              </span>
-            ))}
-          </div>
+          {(loading || runLog.length > 0 || runForCurrentDataset || liveForCurrentDataset.length > 0) && (
+            <div className="nav-tabs" style={{ marginTop: 14, marginBottom: 14 }}>
+              <button
+                type="button"
+                className={activeView === "runner" ? "active" : ""}
+                onClick={() => setActiveView("runner")}
+              >
+                Log{loading ? "…" : ""}
+              </button>
+              <button
+                type="button"
+                className={activeView === "results" ? "active" : ""}
+                onClick={() => setActiveView("results")}
+              >
+                Results
+                {runForCurrentDataset
+                  ? ` (${runForCurrentDataset.summary.passed}/${runForCurrentDataset.summary.total})`
+                  : liveForCurrentDataset.length
+                    ? ` (${liveForCurrentDataset.length})`
+                    : ""}
+              </button>
+            </div>
+          )}
 
-          <div className="nav-tabs" style={{ marginTop: 14, marginBottom: 14 }}>
-            <button
-              type="button"
-              className={activeView === "scenarios" ? "active" : ""}
-              onClick={() => setActiveView("scenarios")}
-            >
-              Scenarios ({dataset.scenarioCount})
-            </button>
-            <button
-              type="button"
-              className={activeView === "summary" ? "active" : ""}
-              onClick={() => setActiveView("summary")}
-            >
-              Markdown summary
-            </button>
-            <button
-              type="button"
-              className={activeView === "runner" ? "active" : ""}
-              onClick={() => setActiveView("runner")}
-              disabled={!loading && !runLog.length}
-            >
-              Runner{loading ? "…" : runLog.length ? ` (${runLog.length})` : ""}
-            </button>
-            <button
-              type="button"
-              className={activeView === "results" ? "active" : ""}
-              onClick={() => setActiveView("results")}
-              disabled={!runResult && !liveResults.length}
-            >
-              Results
-              {runResult
-                ? ` (${runResult.summary.passed}/${runResult.summary.total})`
-                : liveResults.length
-                  ? ` (${liveResults.length})`
-                  : ""}
-            </button>
-            <button
-              type="button"
-              className={activeView === "json" ? "active" : ""}
-              onClick={() => setActiveView("json")}
-            >
-              Raw JSON
-            </button>
-          </div>
+          {activeView === "google_sheet" && dataset.sheetRows?.length > 0 && (
+            <div>
+              <p className="hint" style={{ marginBottom: 12 }}>
+                Paste into Google Sheets starting at cell A1. Column order matches your QA template.
+              </p>
+              <div className="toolbar" style={{ marginBottom: 12 }}>
+                <button className="primary" onClick={copySheetTsv}>
+                  Copy TSV for Google Sheets
+                </button>
+                <button className="muted" onClick={downloadSheetCsv}>
+                  Download CSV
+                </button>
+              </div>
+              <div className="sheet-table-wrap">
+                <table className="sheet-table">
+                  <thead>
+                    <tr>
+                      {SHEET_COLUMNS.map((col) => (
+                        <th key={col}>{col}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dataset.sheetRows.map((row, idx) => (
+                      <tr key={row.TC_ID || idx}>
+                        {SHEET_COLUMNS.map((col) => (
+                          <td key={col}>{row[col]}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
-          {activeView === "scenarios" && (
-            <div className="scenario-list">
-              {dataset.scenarios.map((s) => {
+          {(activeView === "scenarios" || !loading) && (
+            <details className="scenario-list" style={{ marginTop: 12 }}>
+              <summary className="hint" style={{ cursor: "pointer" }}>
+                Scenario list ({(dataset.scenarios || []).length})
+              </summary>
+              {(dataset.scenarios || []).map((s) => {
                 const result = resultByScenarioId(s.id);
                 return (
                 <details key={s.id} className="scenario-card">
@@ -781,7 +2259,7 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
                 </details>
               );
               })}
-            </div>
+            </details>
           )}
 
           {activeView === "runner" && (loading || runLog.length > 0) && (
@@ -791,7 +2269,7 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
                   <div
                     className="run-progress-fill"
                     style={{
-                      width: `${(liveResults.length / Math.max(dataset.scenarios.length, 1)) * 100}%`,
+                      width: `${(liveForCurrentDataset.length / Math.max(dataset.scenarios.length, 1)) * 100}%`,
                     }}
                   />
                 </div>
@@ -813,9 +2291,9 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
                   </div>
                 ))}
               </div>
-              {liveResults.length > 0 && (
+              {liveForCurrentDataset.length > 0 && (
                 <div className="screens-grid" style={{ marginTop: 14 }}>
-                  {liveResults
+                  {liveForCurrentDataset
                     .filter((r) => r.screenshots?.length)
                     .flatMap((r) =>
                       r.screenshots.map((s) => (
@@ -832,9 +2310,9 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
             </div>
           )}
 
-          {activeView === "results" && (runResult || liveResults.length > 0) && (
+          {activeView === "results" && (runForCurrentDataset || liveForCurrentDataset.length > 0) && (
             <div className="scenario-list">
-              {(runResult?.results || liveResults).map((r) => (
+              {(runForCurrentDataset?.results || liveForCurrentDataset).map((r) => (
                 <div key={r.scenarioId} className={`result-row ${r.status}`}>
                   <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
                     <div>
@@ -842,10 +2320,18 @@ function TestingPanel({ configured, model, provider, onBusyChange }) {
                       <div className="hint">
                         {r.category} · {r.type} · {Math.round((r.durationMs || 0) / 1000)}s
                         {r.screenshots?.length ? ` · ${r.screenshots.length} screenshot(s)` : ""}
+                        {r.video?.url ? " · recording" : ""}
                       </div>
                     </div>
                     {statusBadge(r.status)}
                   </div>
+                  {r.video?.url && (
+                    <video
+                      controls
+                      style={{ display: "block", maxWidth: "100%", marginTop: 10 }}
+                      src={r.video.url}
+                    />
+                  )}
                   {r.screenshots?.length > 0 && (
                     <div className="screens-grid" style={{ marginTop: 10 }}>
                       {r.screenshots.map((s) => (

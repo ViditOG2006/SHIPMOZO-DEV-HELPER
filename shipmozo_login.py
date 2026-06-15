@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import re
+import time
 from pathlib import Path
 from typing import Iterable
 
@@ -10,21 +13,48 @@ from playwright.async_api import Page
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
 
+from panel_ui_helpers import dismiss_blocking_overlays
+from panel_url import default_panel_base, login_urls
 
-EMAIL = os.getenv("SHIPMOZO_EMAIL", "munish@apporio.in")
+E2E_FAST = os.getenv("E2E_FAST", "1").lower() in {"1", "true", "yes"}
+
+
+EMAIL = os.getenv("SHIPMOZO_EMAIL", "tech@shipmozo.com")
 PASSWORD = os.getenv("SHIPMOZO_PASSWORD", "12345678")
 HEADLESS = os.getenv("HEADLESS", "false").lower() in {"1", "true", "yes"}
 
-LOGIN_URLS = [
-    "https://panel.appiify.com",
-    "https://panel.shipmozo.com",
-]
+LOGIN_URLS = login_urls()
 
 DASHBOARD_URL_HINT = "/orders/new"
+LOGIN_PATH_HINT = "/login"
+LOGIN_WAIT_S = int(os.getenv("LOGIN_WAIT_S", "30"))
 OUTPUT_DIR = Path("output")
 OUTPUT_DIR.mkdir(exist_ok=True)
 STATE_PATH = OUTPUT_DIR / "shipmozo-state.json"
 SCREENSHOT_PATH = OUTPUT_DIR / "shipmozo-dashboard.png"
+
+EMAIL_SELECTORS = [
+    'input[type="email"]',
+    'input[type="tel"]',
+    'input[name="email"]',
+    'input[name="username"]',
+    'input[placeholder*="Email"]',
+    'input[placeholder*="email"]',
+    'input[placeholder*="phone"]',
+    'input[placeholder*="Email or phone"]',
+    'input[aria-label*="Email"]',
+    'input[aria-label*="phone"]',
+    'input[autocomplete="username"]',
+]
+
+PASSWORD_SELECTORS = [
+    'input[type="password"]',
+    'input[name="password"]',
+    'input[placeholder*="Password"]',
+    'input[placeholder*="password"]',
+    'input[aria-label*="Password"]',
+    'input[autocomplete="current-password"]',
+]
 
 
 async def first_visible(page: Page, selectors: Iterable[str], timeout: int = 3000):
@@ -38,17 +68,53 @@ async def first_visible(page: Page, selectors: Iterable[str], timeout: int = 300
     return None
 
 
+def _emails_match(a: str, b: str) -> bool:
+    return (a or "").strip().lower() == (b or "").strip().lower()
+
+
+def _state_is_stale() -> bool:
+    """Remember-me localStorage without auth cookies cannot skip login."""
+    if not STATE_PATH.exists():
+        return False
+    try:
+        data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return True
+    cookies = data.get("cookies") or []
+    return len(cookies) == 0
+
+
+def _login_page_urls() -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for base in login_urls():
+        for suffix in ("/login", ""):
+            url = f"{base.rstrip('/')}{suffix}"
+            if url not in seen:
+                seen.add(url)
+                out.append(url)
+    return out
+
+
+def _is_on_login_page(url: str) -> bool:
+    return LOGIN_PATH_HINT in (url or "").lower()
+
+
 async def is_logged_in(page: Page) -> bool:
     try:
-        await page.wait_for_load_state("domcontentloaded")
-        if DASHBOARD_URL_HINT in page.url:
+        url = page.url or ""
+        if _is_on_login_page(url):
+            return False
+        if DASHBOARD_URL_HINT in url:
             return True
+        if not E2E_FAST:
+            await page.wait_for_load_state("domcontentloaded")
         dashboard_markers = [
-            "text=Shipment Booking",
             "text=Add Order",
-            "text=New",
-            "text=Courier Assigned",
+            "text=Shipment Booking",
             "text=Orders",
+            "text=New",
+            "text=Analytics",
         ]
         for marker in dashboard_markers:
             if await page.locator(marker).count() > 0:
@@ -60,73 +126,112 @@ async def is_logged_in(page: Page) -> bool:
 
 async def _click_login_button(page: Page) -> None:
     button_candidates = [
-        page.get_by_role("button", name="Sign In"),
+        page.get_by_role("button", name=re.compile(r"^log\s*in$", re.I)),
+        page.get_by_role("button", name=re.compile(r"^sign\s*in$", re.I)),
         page.get_by_role("button", name="Log In"),
+        page.get_by_role("button", name="Sign In"),
         page.get_by_role("button", name="Login"),
-        page.get_by_role("button", name="SIGN IN"),
-        page.get_by_role("button", name="LOG IN"),
         page.locator('button[type="submit"]'),
         page.locator('input[type="submit"]'),
-        page.locator("button").filter(has_text="Log In"),
-        page.locator("button").filter(has_text="Sign In"),
+        page.locator("button").filter(has_text=re.compile(r"log\s*in", re.I)),
+        page.locator("button").filter(has_text=re.compile(r"sign\s*in", re.I)),
     ]
     for candidate in button_candidates:
         try:
             if await candidate.count() > 0:
                 target = candidate.first
-                if await target.is_visible():
-                    await target.click()
-                else:
-                    await target.click(force=True)
+                await target.wait_for(state="visible", timeout=3000)
+                await target.click(timeout=5000)
                 return
         except Exception:
             continue
     raise RuntimeError("Login button not found")
 
 
-async def login(page: Page) -> None:
-    email_field = await first_visible(
-        page,
-        [
-            'input[type="email"]',
-            'input[type="tel"]',
-            'input[name="email"]',
-            'input[name="username"]',
-            'input[placeholder*="Email"]',
-            'input[placeholder*="email"]',
-            'input[placeholder*="phone"]',
-            'input[placeholder*="Email or phone"]',
-            'input[aria-label*="Email"]',
-            'input[aria-label*="phone"]',
-            'input[autocomplete="username"]',
-        ],
-        timeout=8000,
+async def _submit_login_form(page: Page, password_field) -> None:
+    """Submit login — Enter on password field is most reliable for React forms."""
+    await asyncio.sleep(0.2)
+    try:
+        await password_field.press("Enter")
+        await asyncio.sleep(0.5)
+        if not _is_on_login_page(page.url or "") or await is_logged_in(page):
+            return
+    except Exception:
+        pass
+    await _click_login_button(page)
+
+
+async def _fill_field(field, value: str) -> None:
+    await field.click()
+    await field.fill(value)
+
+
+async def _fill_login_credentials(page: Page, email_field, password_field) -> str:
+    """
+    Fill login form. When remember-me already prefilled the email, leave it and
+    only fill password. Otherwise use SHIPMOZO_EMAIL from .env.
+    """
+    prefilled = (await email_field.input_value()).strip()
+    if prefilled:
+        use_email = prefilled
+    elif EMAIL.strip():
+        await _fill_field(email_field, EMAIL)
+        use_email = EMAIL.strip()
+    else:
+        raise RuntimeError("No email on login form and SHIPMOZO_EMAIL is not set in .env")
+
+    await password_field.click()
+    await password_field.fill(PASSWORD)
+
+    pwd_val = (await password_field.input_value()).strip()
+    if not pwd_val:
+        raise RuntimeError("Password field empty after fill — check SHIPMOZO_PASSWORD in .env")
+
+    return use_email
+
+
+async def _wait_for_login_complete(page: Page, *, timeout_s: int = LOGIN_WAIT_S) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if await is_logged_in(page):
+            return
+        url = page.url or ""
+        if not _is_on_login_page(url) and "/orders" in url:
+            return
+        await asyncio.sleep(0.35)
+    url = page.url or ""
+    if await is_logged_in(page):
+        return
+    hint = "still on login page" if _is_on_login_page(url) else f"stuck at {url}"
+    raise RuntimeError(
+        f"Login did not complete within {timeout_s}s ({hint}). "
+        "Check SHIPMOZO_EMAIL / SHIPMOZO_PASSWORD in .env."
     )
+
+
+async def login(page: Page) -> None:
+    await dismiss_blocking_overlays(page)
+
+    email_field = await first_visible(page, EMAIL_SELECTORS, timeout=8000)
     if not email_field:
         if await is_logged_in(page):
             return
-        raise RuntimeError("Email/phone input not found")
+        raise RuntimeError("Email/phone input not found on login page")
 
-    password_field = await first_visible(
-        page,
-        [
-            'input[type="password"]',
-            'input[name="password"]',
-            'input[placeholder*="Password"]',
-            'input[placeholder*="password"]',
-            'input[aria-label*="Password"]',
-            'input[autocomplete="current-password"]',
-        ],
-        timeout=8000,
-    )
+    password_field = await first_visible(page, PASSWORD_SELECTORS, timeout=8000)
     if not password_field:
         if await is_logged_in(page):
             return
-        raise RuntimeError("Password input not found")
+        raise RuntimeError("Password input not found on login page")
 
-    await email_field.fill(EMAIL)
-    await password_field.fill(PASSWORD)
-    await _click_login_button(page)
+    used_email = await _fill_login_credentials(page, email_field, password_field)
+    await _submit_login_form(page, password_field)
+    await _wait_for_login_complete(page)
+    if not await is_logged_in(page):
+        raise RuntimeError(
+            f"Login failed for {used_email}. Current URL: {page.url}. "
+            "Verify SHIPMOZO_EMAIL and SHIPMOZO_PASSWORD in .env."
+        )
 
 
 async def _navigate_with_healing(page: Page, url: str) -> None:
@@ -141,15 +246,10 @@ async def _navigate_with_healing(page: Page, url: str) -> None:
         except PlaywrightError:
             if attempt == 1:
                 raise
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.25)
 
 
-async def async_login_and_save_state():
-    """
-    Logs in and returns:
-    (playwright, browser, context, page)
-    Caller must close these objects.
-    """
+async def _open_session(*, use_state: bool):
     p = await async_playwright().start()
     browser = await p.chromium.launch(
         headless=HEADLESS,
@@ -164,48 +264,127 @@ async def async_login_and_save_state():
         "viewport": {"width": 1920, "height": 1080},
         "device_scale_factor": 1,
     }
-    if STATE_PATH.exists():
+    record_video = os.getenv("RECORD_VIDEO", "").lower() in {"1", "true", "yes"}
+    video_dir = os.getenv("E2E_VIDEO_DIR", "").strip()
+    if record_video:
+        vid_path = Path(video_dir) if video_dir else OUTPUT_DIR / "e2e-videos"
+        vid_path.mkdir(parents=True, exist_ok=True)
+        context_opts["record_video_dir"] = str(vid_path)
+        context_opts["record_video_size"] = {"width": 1280, "height": 720}
+    if use_state and STATE_PATH.exists():
         context_opts["storage_state"] = str(STATE_PATH)
     context = await browser.new_context(**context_opts)
     page = await context.new_page()
-    page.set_default_timeout(30000)
-    page.set_default_navigation_timeout(45000)
+    if E2E_FAST:
+        page.set_default_timeout(8000)
+        page.set_default_navigation_timeout(15000)
+    else:
+        page.set_default_timeout(30000)
+        page.set_default_navigation_timeout(45000)
+    return p, browser, context, page
 
-    try:
-        for url in LOGIN_URLS:
-            await _navigate_with_healing(page, url)
 
+async def _attempt_login(page: Page, context) -> None:
+    base = default_panel_base().rstrip("/")
+    if STATE_PATH.exists():
+        try:
+            await page.goto(f"{base}/orders/new", wait_until="domcontentloaded", timeout=12000)
             if await is_logged_in(page):
                 await context.storage_state(path=str(STATE_PATH))
-                return p, browser, context, page
-
-            try:
-                await login(page)
-                await page.wait_for_load_state("domcontentloaded")
-                await asyncio.sleep(3)
-                try:
-                    await page.wait_for_url(f"**{DASHBOARD_URL_HINT}**", timeout=20000)
-                except Exception:
-                    pass
-                if await is_logged_in(page):
-                    await context.storage_state(path=str(STATE_PATH))
-                    return p, browser, context, page
-            except Exception:
-                continue
-
-        try:
-            await page.wait_for_url(f"**{DASHBOARD_URL_HINT}", timeout=15000)
+                return
         except Exception:
             pass
 
-        if not await is_logged_in(page):
-            raise RuntimeError(f"Login failed. Current URL: {page.url}")
+    primary_login = f"{base}/login"
+    urls = [primary_login] + [u for u in _login_page_urls() if u != primary_login]
 
+    last_error: Exception | None = None
+    login_attempted = False
+    for url in urls:
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=15000 if E2E_FAST else 45000)
+        except Exception as exc:
+            last_error = exc
+            continue
+
+        await dismiss_blocking_overlays(page)
+
+        if await is_logged_in(page):
+            await context.storage_state(path=str(STATE_PATH))
+            return
+
+        has_login_form = _is_on_login_page(page.url or "") or await first_visible(
+            page, EMAIL_SELECTORS, timeout=3000
+        )
+        if not has_login_form:
+            continue
+
+        login_attempted = True
+        try:
+            await login(page)
+            if await is_logged_in(page):
+                await context.storage_state(path=str(STATE_PATH))
+                return
+        except Exception as exc:
+            last_error = exc
+            break
+
+    if await is_logged_in(page):
         await context.storage_state(path=str(STATE_PATH))
-        return p, browser, context, page
-    except Exception:
-        await context.close()
-        await browser.close()
-        await p.stop()
-        raise
+        return
+
+    if last_error:
+        raise RuntimeError(f"Login failed. Current URL: {page.url}. {last_error}") from last_error
+    if login_attempted:
+        raise RuntimeError(
+            f"Login failed. Current URL: {page.url}. "
+            "Check SHIPMOZO_EMAIL / SHIPMOZO_PASSWORD in .env."
+        )
+    raise RuntimeError(
+        f"Could not open login page. Current URL: {page.url}. "
+        "Check SHIPMOZO_PANEL_URL in .env."
+    )
+
+
+async def async_login_and_save_state():
+    """
+    Logs in and returns:
+    (playwright, browser, context, page)
+    Caller must close these objects.
+    """
+    stale_state = _state_is_stale()
+    if stale_state and STATE_PATH.exists():
+        STATE_PATH.unlink(missing_ok=True)
+
+    last_error: Exception | None = None
+    for fresh_attempt in range(2):
+        p = browser = context = page = None
+        try:
+            use_state = (
+                fresh_attempt == 0
+                and not stale_state
+                and STATE_PATH.exists()
+            )
+            if fresh_attempt == 1:
+                if STATE_PATH.exists():
+                    STATE_PATH.unlink(missing_ok=True)
+                use_state = False
+
+            p, browser, context, page = await _open_session(use_state=use_state)
+            await _attempt_login(page, context)
+            return p, browser, context, page
+        except Exception as exc:
+            last_error = exc
+            if context:
+                await context.close()
+            if browser:
+                await browser.close()
+            if p:
+                await p.stop()
+            if fresh_attempt == 1 or not stale_state:
+                raise
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("Login failed — check SHIPMOZO_EMAIL / SHIPMOZO_PASSWORD in .env.")
 

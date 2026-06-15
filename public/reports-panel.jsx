@@ -2,11 +2,27 @@ const { useEffect, useState, useRef, useLayoutEffect } = React;
 
 const fetchJson = (path, options) => window.DevHelperApi.fetchJson(path, options);
 
-function ReportsPanel() {
+const REPORT_TABS = [
+  { id: "prd", label: "PRD (Technical)" },
+  { id: "user_manual", label: "User Manual" },
+];
+
+function downloadText(filename, text) {
+  if (!text) return;
+  const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function ReportsPanel({ configured, model, provider, onGoToTesting }) {
   const [reports, setReports] = useState([]);
   const [searchQ, setSearchQ] = useState("");
   const [searchHits, setSearchHits] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [reportTab, setReportTab] = useState("prd");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
@@ -92,9 +108,16 @@ function ReportsPanel() {
   }, []);
 
   useLayoutEffect(() => {
-    window.DevHelperMarkdown?.enhance(searchMarkdownRef.current);
-    window.DevHelperMarkdown?.enhance(reportMarkdownRef.current);
-  }, [searchHits, selected]);
+    let cancelled = false;
+    (async () => {
+      await window.DevHelperMarkdown?.enhance(searchMarkdownRef.current);
+      if (cancelled) return;
+      await window.DevHelperMarkdown?.enhance(reportMarkdownRef.current);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [searchHits, selected, reportTab]);
 
   const openReport = async (sessionId) => {
     setLoading(true);
@@ -102,6 +125,7 @@ function ReportsPanel() {
     try {
       const data = await fetchJson(`/api/reports/${sessionId}`);
       setSelected(data.report);
+      setReportTab(data.report?.prd ? "prd" : "user_manual");
     } catch (err) {
       setMessage(String(err));
       setMessageType("err");
@@ -130,6 +154,56 @@ function ReportsPanel() {
     }
   };
 
+  const createTestCases = async () => {
+    if (!selected?.moduleName) return;
+    if (!selected.prd && !selected.user_manual) {
+      setMessage("This report has no PRD or user manual content.");
+      setMessageType("err");
+      return;
+    }
+    if (!configured) {
+      setMessage("Configure an AI API key in API Settings first.");
+      setMessageType("err");
+      return;
+    }
+
+    setLoading(true);
+    setMessage(`Creating test cases for ${selected.moduleName}…`);
+    setMessageType("info");
+
+    try {
+      const data = await window.DevHelperApi.startAndPollTestcaseGen(
+        {
+          moduleName: selected.moduleName,
+          prd: selected.prd || "",
+          userManual: selected.user_manual || "",
+          description: selected.description || "",
+          sessionId: selected.sessionId,
+          save: true,
+          options: { minScenarios: 10, includeLivePanel: true },
+        },
+        {
+          onProgress: (_st, sec) => {
+            setMessage(`Creating test cases for ${selected.moduleName}… (${sec}s)`);
+          },
+        }
+      );
+      setMessage(`Created ${data.dataset.scenarioCount} test scenarios.`);
+      setMessageType("ok");
+      if (onGoToTesting) onGoToTesting(data.dataset);
+      else {
+        window.dispatchEvent(
+          new CustomEvent("devhelper:import-dataset", { detail: { dataset: data.dataset } })
+        );
+      }
+    } catch (err) {
+      setMessage(String(err));
+      setMessageType("err");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const runSearch = async () => {
     const q = searchQ.trim();
     if (!q) return;
@@ -149,6 +223,16 @@ function ReportsPanel() {
       setLoading(false);
     }
   };
+
+  const selectedReportMarkdown = selected
+    ? reportTab === "prd"
+      ? selected.prd
+      : window.DevHelperMarkdown?.appendMediaIfMissing?.(
+          selected.user_manual,
+          selected.screenshots || [],
+          selected.videos || []
+        ) || selected.user_manual
+    : "";
 
   return (
     <div>
@@ -209,7 +293,7 @@ function ReportsPanel() {
                 {hit.moduleName} · {hit.title} · score {hit.score}
               </div>
               <article
-                className="markdown-body"
+                className="markdown-body docs-preview"
                 dangerouslySetInnerHTML={{
                   __html: window.DevHelperMarkdown?.parse(hit.text) || marked.parse(hit.text),
                 }}
@@ -239,18 +323,26 @@ function ReportsPanel() {
                   <div className="report-item-title">{r.moduleName}</div>
                   <div className="report-item-meta">
                     {r.screenshotCount || 0} screenshots · {new Date(r.createdAt).toLocaleString()}
-                    {r.cloud?.jsonUrl && (
+                    {r.cloud?.prdUrl && (
                       <>
                         {" · "}
-                        <a href={r.cloud.jsonUrl} target="_blank" rel="noreferrer">
-                          cloud backup
+                        <a href={r.cloud.prdUrl} target="_blank" rel="noreferrer">
+                          PRD
+                        </a>
+                      </>
+                    )}
+                    {r.cloud?.manualUrl && (
+                      <>
+                        {" · "}
+                        <a href={r.cloud.manualUrl} target="_blank" rel="noreferrer">
+                          manual
                         </a>
                       </>
                     )}
                   </div>
                 </div>
                 <div className="report-item-actions">
-                  <button className="primary" onClick={() => openReport(r.sessionId)}>
+                  <button type="button" className="primary" onClick={() => openReport(r.sessionId)}>
                     Open
                   </button>
                   <button className="danger" onClick={() => deleteOne(r.sessionId)} disabled={loading}>
@@ -270,19 +362,96 @@ function ReportsPanel() {
               {selected.moduleName}{" "}
               <span className="badge badge-muted">{selected.sessionId}</span>
             </h3>
-            <button className="muted" onClick={() => setSelected(null)}>
-              Close
-            </button>
+            <div className="toolbar">
+              <button
+                className="muted"
+                type="button"
+                disabled={!selected.prd}
+                onClick={() =>
+                  downloadText(`${selected.moduleName || "module"}-prd.md`, selected.prd)
+                }
+              >
+                Download PRD
+              </button>
+              <button
+                className="muted"
+                type="button"
+                disabled={!selected.user_manual}
+                onClick={() =>
+                  downloadText(`${selected.moduleName || "module"}-manual.md`, selected.user_manual)
+                }
+              >
+                Download manual
+              </button>
+              <button
+                className="primary"
+                onClick={createTestCases}
+                disabled={loading || !configured}
+              >
+                {loading && message.includes("test cases") ? "Creating…" : "Create test cases"}
+              </button>
+              <button className="muted" onClick={() => setSelected(null)}>
+                Close
+              </button>
+            </div>
           </div>
-          <article
-            ref={reportMarkdownRef}
-            className="markdown-body"
-            dangerouslySetInnerHTML={{
-              __html:
-                window.DevHelperMarkdown?.parse(selected.user_manual || "") ||
-                marked.parse(selected.user_manual || ""),
-            }}
-          />
+          <div className="nav-tabs">
+            {REPORT_TABS.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className={reportTab === t.id ? "active" : ""}
+                onClick={() => setReportTab(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {selected.screenshots?.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <h4>Screenshots</h4>
+              <div className="screens-grid">
+                {selected.screenshots.map((s) => (
+                  <figure key={s.id || s.url}>
+                    <img src={s.url} alt={s.label || "Screenshot"} />
+                    <figcaption>{s.label}</figcaption>
+                  </figure>
+                ))}
+              </div>
+            </div>
+          )}
+          {selected.videos?.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <h4>Screen recordings</h4>
+              <div className="screens-grid">
+                {selected.videos.map((v) => (
+                  <figure key={v.id || v.url}>
+                    <video src={v.url} controls style={{ width: "100%", maxHeight: 280 }} />
+                    <figcaption>
+                      <a href={v.url} target="_blank" rel="noreferrer">
+                        {v.label}
+                      </a>
+                    </figcaption>
+                  </figure>
+                ))}
+              </div>
+            </div>
+          )}
+          {!selectedReportMarkdown ? (
+            <div className="empty-state">
+              <p>No {reportTab === "prd" ? "PRD" : "user manual"} saved for this report.</p>
+            </div>
+          ) : (
+            <article
+              ref={reportMarkdownRef}
+              className="markdown-body docs-preview"
+              dangerouslySetInnerHTML={{
+                __html:
+                  window.DevHelperMarkdown?.parse(selectedReportMarkdown) ||
+                  marked.parse(selectedReportMarkdown),
+              }}
+            />
+          )}
         </div>
       )}
     </div>

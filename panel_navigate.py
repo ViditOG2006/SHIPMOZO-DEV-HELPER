@@ -17,6 +17,7 @@ PANEL_BASE = LOGIN_URLS[0].rstrip("/")
 __all__ = [
     "navigate_to_nav_page",
     "navigate_for_chat",
+    "navigate_module_via_nav_map",
     "page_looks_like_not_found",
     "text_indicates_not_found",
     "hub_for_href",
@@ -36,6 +37,8 @@ def hub_for_href(href: str) -> str:
         return f"{PANEL_BASE}/ndr"
     if "/orders" in path or "/quick" in path:
         return f"{PANEL_BASE}/orders/new"
+    if "/courier" in path or "rate-calculator" in path or "/tools" in path:
+        return f"{PANEL_BASE}/dashboard"
     return f"{PANEL_BASE}/dashboard"
 
 
@@ -81,6 +84,9 @@ async def click_nav_link(page: Page, text: str, href: str) -> bool:
 
 
 async def navigate_for_chat(page: Page, nav_page: dict[str, str]) -> tuple[bool, bool]:
+    from panel_ui_helpers import dismiss_blocking_overlays
+
+    await dismiss_blocking_overlays(page)
     """
     Fast Chat navigation: direct goto first, short content wait.
     Returns (reached, content_ready).
@@ -138,3 +144,72 @@ async def navigate_to_nav_page(
         pass
 
     return False
+
+
+async def navigate_module_via_nav_map(
+    page: Page,
+    module_name: str,
+    description: str = "",
+    *,
+    verify_fn=None,
+    discovered: list | None = None,
+    max_pages: int = 5,
+) -> dict:
+    """
+    Navigate using data/panel-navigation.json when Quick Search fails.
+    Tries sidebar click first, then trusted href goto from the nav map.
+    """
+    from panel_doc_module import docs_capture_allow_nav_map_url, docs_capture_use_nav_map
+    from panel_navigation import rank_pages_for_module
+    from panel_page_state import url_looks_like_broken_nav
+    from panel_ui_helpers import dismiss_blocking_overlays
+
+    if not docs_capture_use_nav_map():
+        return {"ok": False, "error": "nav map disabled", "method": "nav_map"}
+
+    ranked = rank_pages_for_module(module_name, description, discovered)
+    if not ranked:
+        return {"ok": False, "error": "no nav map match", "method": "nav_map"}
+
+    await dismiss_blocking_overlays(page)
+    logs: list[str] = []
+    allow_goto = docs_capture_allow_nav_map_url()
+
+    for nav_page in ranked[:max_pages]:
+        text = nav_page.get("text", "")
+        href = nav_page.get("href", "")
+        logs.append(f"nav map try: {text} → {href}")
+
+        if href and "manage-courier" in href.lower():
+            logs.append("skip manage-courier trap")
+            continue
+
+        if await navigate_to_nav_page(page, nav_page, ready_wait_s=12):
+            if verify_fn is None or await verify_fn(page):
+                return {
+                    "ok": True,
+                    "method": "nav_map_sidebar",
+                    "navPage": nav_page,
+                    "pageUrl": page.url,
+                    "logs": logs,
+                }
+            logs.append(f"sidebar reached but verify failed: {page.url}")
+
+        if allow_goto and href and not url_looks_like_broken_nav(href):
+            try:
+                await page.goto(href, wait_until="domcontentloaded", timeout=28000)
+                await asyncio.sleep(1.0)
+                if not await page_looks_like_not_found(page):
+                    if verify_fn is None or await verify_fn(page):
+                        return {
+                            "ok": True,
+                            "method": "nav_map_goto",
+                            "navPage": nav_page,
+                            "pageUrl": page.url,
+                            "logs": logs,
+                        }
+                    logs.append(f"goto ok but verify failed: {page.url}")
+            except Exception as exc:
+                logs.append(f"goto failed: {exc}")
+
+    return {"ok": False, "error": "nav map routes exhausted", "method": "nav_map", "logs": logs}

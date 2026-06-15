@@ -2,9 +2,9 @@
   "version": 1,
   "baseUrl": "https://panel.appiify.com",
   "source": "merged",
-  "discoveredAt": "2026-06-05T10:10:42.698392+00:00",
-  "crawledUrls": 56,
-  "pageCount": 56,
+  "discoveredAt": "2026-06-15T11:11:02.061140+00:00",
+  "crawledUrls": 58,
+  "pageCount": 58,
   "pages": [
     {
       "text": "Analytics",
@@ -140,6 +140,30 @@
       "keywords": [
         "channels",
         "woocommerce"
+      ]
+    },
+    {
+      "text": "Manage Courier",
+      "href": "https://panel.appiify.com/courier/manage-courier",
+      "path": "/courier/manage-courier",
+      "keywords": [
+        "calculator",
+        "courier",
+        "manage",
+        "rate"
+      ]
+    },
+    {
+      "text": "Rate Calculator",
+      "href": "https://panel.appiify.com/courier/rate-calculator",
+      "path": "/courier/rate-calculator",
+      "keywords": [
+        "calculator",
+        "charges",
+        "courier",
+        "freight",
+        "rate",
+        "shipping"
       ]
     },
     {

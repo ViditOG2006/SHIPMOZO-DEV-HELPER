@@ -22,7 +22,10 @@ MODULE_READY_SELECTORS: dict[str, list[str]] = {
     "/orders/add": [
         'input[placeholder*="phone" i]',
         'input[placeholder*="name" i]',
+        'input[placeholder*="pin" i]',
         'button:has-text("Create")',
+        'button:has-text("Save")',
+        "form",
     ],
     "/orders/new": [
         'input[placeholder*="Search" i]',
@@ -65,6 +68,26 @@ MODULE_READY_SELECTORS: dict[str, list[str]] = {
         "form",
         'input:not([type="hidden"])',
         "main h1, main h2",
+    ],
+    "/courier/rate-calculator": [
+        'input[placeholder*="pincode" i]',
+        'input[name*="pincode" i]',
+        'button:has-text("Calculate")',
+        "text=Origin",
+        "text=Domestic",
+    ],
+    "/couriers/rate-calculator": [
+        'input[placeholder*="pincode" i]',
+        'button:has-text("Calculate")',
+    ],
+    "/tools/rate-calculator": [
+        'input[placeholder*="pincode" i]',
+        'button:has-text("Calculate")',
+    ],
+    "/courier/manage-courier": [
+        'button:has-text("Calculate")',
+        '[role="tab"]:has-text("Rate")',
+        'input[placeholder*="pincode" i]',
     ],
 }
 

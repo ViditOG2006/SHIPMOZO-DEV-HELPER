@@ -25,7 +25,7 @@ if (fs.existsSync(envPath)) {
   }
 }
 
-const { generateModulePackage } = require("../lib/doc-generation");
+const { generateModulePackage, validatePrdQuality } = require("../lib/doc-generation");
 
 const moduleName = process.argv[2] || "Dashboard";
 const description =
@@ -45,13 +45,14 @@ async function runOnce(attempt) {
     captureScreens: true,
   });
 
+  const prdQuality = validatePrdQuality(result.prd || "", { docType: "prd" });
   const ok =
-    Boolean(result.prd && result.prd.length > 200) &&
+    prdQuality.ok &&
     Boolean(result.user_manual && result.user_manual.length > 200) &&
     (result.screenshots?.length || 0) >= minShots(moduleName);
 
   console.log(`Session: ${result.sessionId}`);
-  console.log(`PRD: ${result.prd?.length || 0} chars`);
+  console.log(`PRD: ${result.prd?.length || 0} chars (quality: ${prdQuality.ok ? "ok" : prdQuality.issues.join(", ")})`);
   console.log(`Manual: ${result.user_manual?.length || 0} chars`);
   console.log(`Screenshots: ${result.screenshots?.length || 0}`);
   if (result.captureError) console.log(`Capture note: ${result.captureError}`);
