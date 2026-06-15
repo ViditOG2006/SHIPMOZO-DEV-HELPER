@@ -109,6 +109,9 @@ function loadDotEnv() {
 
 loadDotEnv();
 
+const { applyPlaywrightBrowsersEnv, ensurePlaywrightBrowsersOnStartup } = require("./lib/playwright-browsers");
+applyPlaywrightBrowsersEnv();
+
 const app = express();
 const ROOT = __dirname;
 
@@ -1612,6 +1615,10 @@ const host = process.env.HOST || "0.0.0.0";
 let tunnelProc = null;
 
 clearRuntimePublicUrl();
+
+ensurePlaywrightBrowsersOnStartup().catch((err) => {
+  console.error("[playwright] startup ensure failed:", err.message);
+});
 
 const server = app.listen(port, host, () => {
   const localUrl = getLocalBaseUrl();

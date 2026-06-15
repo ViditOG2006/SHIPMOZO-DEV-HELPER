@@ -21,7 +21,7 @@ services:
       - key: HEADLESS
         value: "true"
       - key: PLAYWRIGHT_BROWSERS_PATH
-        value: /opt/render/.cache/ms-playwright
+        value: /opt/render/project/src/.playwright-browsers
       - key: PLAYWRIGHT_NO_SANDBOX
         value: "true"
       - key: PYTHON_BIN
@@ -34,6 +34,8 @@ services:
         value: "false"
       - key: DOCS_CAPTURE_BUDGET_S
         value: "75"
+      - key: DOCS_CAPTURE_HEAL_ENABLED
+        value: "false"
       - key: DOCS_CAPTURE_HEAL_ATTEMPTS
         value: "1"
       - key: DOCS_CAPTURE_HEAL_MCP

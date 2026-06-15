@@ -88,7 +88,9 @@ DOCS_CAPTURE_FAST = os.getenv("DOCS_CAPTURE_FAST", "1").lower() in {"1", "true",
 _default_budget = "75" if _ON_RENDER else ("120" if DOCS_CAPTURE_FAST else "120")
 DOCS_CAPTURE_BUDGET_S = float(os.getenv("DOCS_CAPTURE_BUDGET_S", _default_budget))
 DOCS_CAPTURE_SINGLE_SHOT = os.getenv("DOCS_CAPTURE_SINGLE_SHOT", "").lower() in {"1", "true", "yes"}
-DOCS_CAPTURE_HEAL_ENABLED = os.getenv("DOCS_CAPTURE_HEAL_ENABLED", "true").lower() not in {
+DOCS_CAPTURE_HEAL_ENABLED = os.getenv(
+    "DOCS_CAPTURE_HEAL_ENABLED", "false" if _ON_RENDER else "true"
+).lower() not in {
     "0",
     "false",
     "no",
@@ -97,7 +99,7 @@ DOCS_CAPTURE_HEAL_ENABLED = os.getenv("DOCS_CAPTURE_HEAL_ENABLED", "true").lower
 _default_heal_attempts = (
     os.getenv("DOCS_CAPTURE_HEAL_ATTEMPTS")
     if os.getenv("DOCS_CAPTURE_HEAL_ATTEMPTS")
-    else ("2" if _ON_RENDER and DOCS_CAPTURE_HEAL_ENABLED else ("5" if DOCS_CAPTURE_HEAL_ENABLED else "3"))
+    else ("1" if _ON_RENDER else ("5" if DOCS_CAPTURE_HEAL_ENABLED else "3"))
 )
 DOCS_CAPTURE_INLINE_HEAL_ATTEMPTS = max(1, int(_default_heal_attempts or "3"))
 DOCS_CAPTURE_OBSERVE_ONLY = os.getenv("DOCS_CAPTURE_OBSERVE_ONLY", "").lower() in {

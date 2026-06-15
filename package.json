@@ -29,6 +29,6 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "express": "^5.2.1",
     "newman": "^6.2.2",
-    "playwright": "^1.49.1"
+    "playwright": "1.61.0"
   }
 }

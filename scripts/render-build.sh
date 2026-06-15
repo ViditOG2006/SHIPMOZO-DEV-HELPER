@@ -2,8 +2,9 @@
 # Render native Node web service build (no Docker).
 set -euo pipefail
 
-# Shared browser cache for Python playwright + Node @playwright/mcp (build and runtime must match).
-export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-/opt/render/.cache/ms-playwright}"
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# Browsers must live inside the deploy artifact — /opt/render/.cache does NOT persist to runtime.
+export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$ROOT_DIR/.playwright-browsers}"
 mkdir -p "$PLAYWRIGHT_BROWSERS_PATH"
 
 retry() {
@@ -24,7 +25,7 @@ retry() {
 }
 
 verify_playwright_browsers() {
-  if find "$PLAYWRIGHT_BROWSERS_PATH" -maxdepth 4 -type f \( -name 'chrome-headless-shell' -o -name 'chrome' \) 2>/dev/null | head -1 | grep -q .; then
+  if find "$PLAYWRIGHT_BROWSERS_PATH" -maxdepth 6 -type f \( -name 'chrome-headless-shell' -o -name 'chrome' \) 2>/dev/null | head -1 | grep -q .; then
     echo "[render-build] Playwright Chromium verified under $PLAYWRIGHT_BROWSERS_PATH"
     return 0
   fi
@@ -45,13 +46,13 @@ fi
 python3 -m pip install --upgrade pip
 python3 -m pip install -r requirements.txt
 
-echo "[render-build] Installing Playwright Chromium (Python)..."
+echo "[render-build] Installing Playwright Chromium (Python, path=$PLAYWRIGHT_BROWSERS_PATH)..."
 if ! retry 3 python3 -m playwright install chromium; then
   echo "[render-build] ERROR: python3 -m playwright install chromium failed after 3 attempts"
   exit 1
 fi
 
-echo "[render-build] Installing Playwright Chromium (Node / MCP)..."
+echo "[render-build] Installing Playwright Chromium (Node, path=$PLAYWRIGHT_BROWSERS_PATH)..."
 if ! retry 3 npx playwright install chromium; then
   echo "[render-build] ERROR: npx playwright install chromium failed after 3 attempts"
   exit 1
