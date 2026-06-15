@@ -1,4 +1,8 @@
-/** Kill any process listening on PORT (default 3000) before starting the dev server. */
+/** Kill any process listening on PORT (local Windows dev only). Skipped on Render. */
+if (process.env.RENDER) {
+  process.exit(0);
+}
+
 const { execSync } = require("child_process");
 
 const port = String(process.env.PORT || "3000").trim();

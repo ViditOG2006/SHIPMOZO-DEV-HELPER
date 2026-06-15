@@ -138,6 +138,8 @@ const {
   getTunnelError,
   getRecommendedAppUrl,
   isAutoTunnelEnabled,
+  isRenderDeploy,
+  getRenderExternalUrl,
   tunnelUrlIsActive,
 } = require("./lib/public-url");
 
@@ -175,8 +177,11 @@ app.get("/api/health", (_req, res) => {
     tunnelStatus: getTunnelStatus(),
     tunnelError: getTunnelError() || null,
     autoTunnel: isAutoTunnelEnabled(),
-    urlNote:
-      "trycloudflare.com URLs expire when npm start stops — always use localUrl on this PC; only use publicUrl while server is running",
+    render: isRenderDeploy(),
+    renderExternalUrl: getRenderExternalUrl() || null,
+    urlNote: isRenderDeploy()
+      ? "On Render — use renderExternalUrl (stable HTTPS). Cloudflare tunnel is disabled."
+      : "Local: use localUrl. trycloudflare.com links expire when npm start stops.",
     ai: getConfigStatus(),
     cloudinary: cloudinaryConfigured(),
     imageStorage: process.env.IMAGE_STORAGE || "local",
@@ -1610,12 +1615,18 @@ clearRuntimePublicUrl();
 
 const server = app.listen(port, host, () => {
   const localUrl = getLocalBaseUrl();
+  const renderUrl = getRenderExternalUrl();
   console.log("");
   console.log("========================================");
   console.log(" Shipmozo Dev Helper");
   console.log("========================================");
-  console.log(`Local (this PC):  ${localUrl}  ← open this URL (always works)`);
-  console.log("Note: Old trycloudflare.com bookmarks die after restart — do not use them.");
+  if (isRenderDeploy()) {
+    console.log(`Render URL:       ${renderUrl || localUrl}  ← public HTTPS (no Cloudflare tunnel)`);
+    console.log("Cloudflare tunnel: off on Render (use Render URL above)");
+  } else {
+    console.log(`Local (this PC):  ${localUrl}  ← open this URL (always works)`);
+    console.log("Note: Old trycloudflare.com bookmarks die after restart — do not use them.");
+  }
 
   if (isAutoTunnelEnabled()) {
     console.log("Public tunnel:    starting cloudflared… (optional, for phone/tablet)");

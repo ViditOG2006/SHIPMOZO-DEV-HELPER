@@ -1,6 +1,8 @@
 services:
   dev-helper:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.playwright
     ports:
       - "${PORT:-3000}:3000"
     env_file:
