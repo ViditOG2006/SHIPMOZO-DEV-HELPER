@@ -1,12 +1,17 @@
-# Render Blueprint — https://render.com/docs/blueprint-spec
-# Deploy: connect GitHub repo → New Blueprint → select render.yaml
-# Set secrets in Render dashboard (sync: false vars).
-
+# Render Web Service (native Node) — NOT Docker.
+# If you see "registry cache importer / buildcache: not found", your Render service
+# is still on Docker runtime. Delete it and recreate as Node (steps below).
+#
+# Dashboard → New → Web Service (NOT Docker):
+#   Runtime: Node | Build: npm run build:render (or npm ci for deps-only) | Start: node server.js
+# No Dockerfile at repo root — Render auto-detects Docker if Dockerfile exists.
 services:
   - type: web
     name: shipmozo-dev-helper
-    runtime: docker
-    plan: standard
+    runtime: node
+    plan: free
+    buildCommand: npm run build:render
+    startCommand: node server.js
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
@@ -17,6 +22,10 @@ services:
         value: "true"
       - key: PYTHON_BIN
         value: python3
+      - key: PUBLIC_TUNNEL
+        value: "false"
+      - key: PUBLIC_BASE_URL
+        value: https://shipmozo-dev-helper-1.onrender.com
       - key: IMAGE_STORAGE
         value: cloudinary
       - key: OPENAI_API_KEY
@@ -39,5 +48,7 @@ services:
         sync: false
       - key: SHIPMOZO_PASSWORD
         sync: false
-      - key: PUBLIC_BASE_URL
+      - key: POSTMAN_API_KEY
+        sync: false
+      - key: POSTMAN_COLLECTION_ID
         sync: false

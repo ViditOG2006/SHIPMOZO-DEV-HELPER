@@ -6,6 +6,8 @@
   "scripts": {
     "prestart": "node scripts/ensure-port-free.js",
     "start": "node server.js",
+    "start:render": "node server.js",
+    "build:render": "bash scripts/render-build.sh",
     "tunnel:install": "node -e \"require('./lib/ensure-cloudflared').resolveCloudflaredBinary({allowDownload:true,log:console.log}).then(p=>console.log(p||'failed'))\"",
     "start:public": "node server.js",
     "start:all": "node server.js",
@@ -19,6 +21,9 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "express": "^5.2.1",
