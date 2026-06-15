@@ -78,6 +78,41 @@
     return "text";
   }
 
+  function sanitizeSubgraphLine(line) {
+    const m = line.match(/^(\s*)subgraph\s+(\S(?:.*\S)?)\s*$/i);
+    if (!m) return line;
+    const indent = m[1];
+    const title = m[2].trim();
+    if (title.includes("[") || title.startsWith('"')) return line;
+    if (!/\s/.test(title) && /^[A-Za-z_]\w*$/.test(title)) return line;
+    const id = title.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "") || "subgraph";
+    const safeTitle = title.replace(/"/g, "#quot;");
+    return `${indent}subgraph ${id} [${safeTitle}]`;
+  }
+
+  function sanitizeFlowchartColonNodes(line) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("%%")) return line;
+    if (/^(subgraph|end|style|classDef|class|linkStyle|click)\b/i.test(trimmed)) return line;
+
+    let out = line;
+
+    out = out.replace(/(\b[A-Za-z_]\w*)\([^)]*\)\s*:\s*(.+?)\s*$/g, (_, id, label) => {
+      return `${id}[${quoteMermaidLabel(label.trim())}]`;
+    });
+
+    out = out.replace(/(\b[A-Za-z_]\w*)\(([^)"]+)\)/g, (match, id, inner) => {
+      if (/^(style|classDef|class|linkStyle|click)\b/i.test(id)) return match;
+      const t = inner.trim();
+      if (/^(service|queue|client|api|gateway|ui)$/i.test(t)) return match;
+      if (/^[A-Za-z_][\w]*$/.test(t)) return match;
+      if (/\s/.test(t) || labelNeedsQuoting(t)) return `${id}(${quoteMermaidLabel(t)})`;
+      return match;
+    });
+
+    return out;
+  }
+
   function sanitizeFlowchartNodeLabels(line) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("%%")) return line;
@@ -116,7 +151,10 @@
   function sanitizeFlowchartSource(source) {
     const text = String(source || "").trim();
     if (!/^(?:graph|flowchart)\s/im.test(text)) return text;
-    return text.split("\n").map(sanitizeFlowchartNodeLabels).join("\n");
+    return text
+      .split("\n")
+      .map((line) => sanitizeFlowchartNodeLabels(sanitizeFlowchartColonNodes(sanitizeSubgraphLine(line))))
+      .join("\n");
   }
 
   function sanitize(source) {
@@ -150,6 +188,8 @@
     sanitize,
     sanitizeMarkdown,
     sanitizeFlowchartSource,
+    sanitizeSubgraphLine,
+    sanitizeFlowchartColonNodes,
     labelNeedsQuoting,
     quoteMermaidLabel,
     unwrapDocumentCodeFence,

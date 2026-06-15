@@ -1662,7 +1662,7 @@ const server = app.listen(port, host, () => {
         console.error("[tunnel] Failed to start:", err.message);
       });
   } else {
-    console.log("Public tunnel:    off (PUBLIC_TUNNEL=false)");
+    console.log("Public tunnel:    off (PUBLIC_TUNNEL=false or Render deploy)");
     console.log("========================================");
     console.log("");
   }

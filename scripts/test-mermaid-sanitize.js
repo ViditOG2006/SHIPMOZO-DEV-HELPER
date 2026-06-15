@@ -125,6 +125,39 @@ if (flowClean.includes("E[Submit Order Request (API)]")) {
   ok = false;
 }
 
+const FAILING_FLOWCHART = `flowchart LR
+    subgraph External Sources
+        ChannelAPIs("Channels: Amazon, Shopify, eBay")
+        PaymentGateway(Payment Services)
+    end
+    subgraph NewOrdersModule
+        Ingest(Service): Order Ingest Service
+        Normalize(Service): Normalization & Validation
+        ProcessQueue(Queue): Order Processing Queue
+        UI(Client): User Interface
+    end`;
+
+const failingClean = sanitizeMermaidSource(FAILING_FLOWCHART);
+const failingChecks = [
+  ['subgraph External_Sources [External Sources]', 'subgraph title'],
+  ['PaymentGateway("Payment Services")', 'unquoted paren label'],
+  ['Ingest["Order Ingest Service"]', 'colon Service syntax'],
+  ['Normalize["Normalization & Validation"]', 'colon Normalize syntax'],
+  ['ProcessQueue["Order Processing Queue"]', 'colon Queue syntax'],
+  ['UI["User Interface"]', 'colon UI syntax'],
+];
+for (const [token, label] of failingChecks) {
+  if (!failingClean.includes(token)) {
+    console.error("FAIL:", label, "- expected", token);
+    console.error("Got:", failingClean);
+    ok = false;
+  }
+}
+if (failingClean.includes("(Service):") || failingClean.includes("(Queue):")) {
+  console.error("FAIL: PlantUML-style colon nodes still present");
+  ok = false;
+}
+
 if (ok) {
   console.log("OK mermaid sanitize");
   console.log(cleaned.split("\n").slice(7, 16).join("\n"));

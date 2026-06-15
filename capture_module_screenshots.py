@@ -80,8 +80,13 @@ from shipmozo_login import first_visible, is_logged_in
 
 PANEL_BASE = LOGIN_URLS[0].rstrip("/")
 
+_ON_RENDER = os.getenv("RENDER", "").lower() in {"true", "1", "yes"} or bool(
+    os.getenv("RENDER_EXTERNAL_URL", "").strip()
+)
+
 DOCS_CAPTURE_FAST = os.getenv("DOCS_CAPTURE_FAST", "1").lower() in {"1", "true", "yes"}
-DOCS_CAPTURE_BUDGET_S = float(os.getenv("DOCS_CAPTURE_BUDGET_S", "120" if DOCS_CAPTURE_FAST else "120"))
+_default_budget = "75" if _ON_RENDER else ("120" if DOCS_CAPTURE_FAST else "120")
+DOCS_CAPTURE_BUDGET_S = float(os.getenv("DOCS_CAPTURE_BUDGET_S", _default_budget))
 DOCS_CAPTURE_SINGLE_SHOT = os.getenv("DOCS_CAPTURE_SINGLE_SHOT", "").lower() in {"1", "true", "yes"}
 DOCS_CAPTURE_HEAL_ENABLED = os.getenv("DOCS_CAPTURE_HEAL_ENABLED", "true").lower() not in {
     "0",
@@ -92,7 +97,7 @@ DOCS_CAPTURE_HEAL_ENABLED = os.getenv("DOCS_CAPTURE_HEAL_ENABLED", "true").lower
 _default_heal_attempts = (
     os.getenv("DOCS_CAPTURE_HEAL_ATTEMPTS")
     if os.getenv("DOCS_CAPTURE_HEAL_ATTEMPTS")
-    else ("5" if DOCS_CAPTURE_HEAL_ENABLED else "3")
+    else ("2" if _ON_RENDER and DOCS_CAPTURE_HEAL_ENABLED else ("5" if DOCS_CAPTURE_HEAL_ENABLED else "3"))
 )
 DOCS_CAPTURE_INLINE_HEAL_ATTEMPTS = max(1, int(_default_heal_attempts or "3"))
 DOCS_CAPTURE_OBSERVE_ONLY = os.getenv("DOCS_CAPTURE_OBSERVE_ONLY", "").lower() in {
@@ -100,9 +105,12 @@ DOCS_CAPTURE_OBSERVE_ONLY = os.getenv("DOCS_CAPTURE_OBSERVE_ONLY", "").lower() i
     "true",
     "yes",
 }
-DOCS_CAPTURE_POST_NAV_WAIT_S = float(os.getenv("DOCS_CAPTURE_POST_NAV_WAIT_S", "2.5"))
-DOCS_VIDEO_WALKTHROUGH_S = float(os.getenv("DOCS_VIDEO_WALKTHROUGH_S", "12"))
-DOCS_ADD_ORDER_VIDEO_S = float(os.getenv("DOCS_ADD_ORDER_VIDEO_S", "18"))
+_default_post_nav = "1.5" if _ON_RENDER else "2.5"
+DOCS_CAPTURE_POST_NAV_WAIT_S = float(os.getenv("DOCS_CAPTURE_POST_NAV_WAIT_S", _default_post_nav))
+_default_video_walk = "0" if _ON_RENDER else "12"
+DOCS_VIDEO_WALKTHROUGH_S = float(os.getenv("DOCS_VIDEO_WALKTHROUGH_S", _default_video_walk))
+_default_add_order_video = "0" if _ON_RENDER else "18"
+DOCS_ADD_ORDER_VIDEO_S = float(os.getenv("DOCS_ADD_ORDER_VIDEO_S", _default_add_order_video))
 
 
 def docs_fast() -> bool:

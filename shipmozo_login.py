@@ -22,6 +22,9 @@ E2E_FAST = os.getenv("E2E_FAST", "1").lower() in {"1", "true", "yes"}
 EMAIL = os.getenv("SHIPMOZO_EMAIL", "tech@shipmozo.com")
 PASSWORD = os.getenv("SHIPMOZO_PASSWORD", "12345678")
 HEADLESS = os.getenv("HEADLESS", "false").lower() in {"1", "true", "yes"}
+_ON_RENDER = os.getenv("RENDER", "").lower() in {"true", "1", "yes"} or bool(
+    os.getenv("RENDER_EXTERNAL_URL", "").strip()
+)
 
 LOGIN_URLS = login_urls()
 
@@ -251,14 +254,24 @@ async def _navigate_with_healing(page: Page, url: str) -> None:
 
 async def _open_session(*, use_state: bool):
     p = await async_playwright().start()
+    chromium_args = [
+        "--disable-gpu",
+        "--window-size=1920,1080",
+        "--force-device-scale-factor=1",
+        "--high-dpi-support=1",
+    ]
+    if _ON_RENDER or os.getenv("PLAYWRIGHT_NO_SANDBOX", "").lower() in {"1", "true", "yes"}:
+        chromium_args.extend(
+            [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--single-process",
+            ]
+        )
     browser = await p.chromium.launch(
         headless=HEADLESS,
-        args=[
-            "--disable-gpu",
-            "--window-size=1920,1080",
-            "--force-device-scale-factor=1",
-            "--high-dpi-support=1",
-        ],
+        args=chromium_args,
     )
     context_opts: dict = {
         "viewport": {"width": 1920, "height": 1080},
