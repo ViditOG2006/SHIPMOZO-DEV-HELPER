@@ -8,6 +8,7 @@
     "start": "node server.js",
     "start:render": "node server.js",
     "build:render": "bash scripts/render-build.sh",
+    "playwright:install": "playwright install chromium",
     "tunnel:install": "node -e \"require('./lib/ensure-cloudflared').resolveCloudflaredBinary({allowDownload:true,log:console.log}).then(p=>console.log(p||'failed'))\"",
     "start:public": "node server.js",
     "start:all": "node server.js",
@@ -27,6 +28,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "express": "^5.2.1",
-    "newman": "^6.2.2"
+    "newman": "^6.2.2",
+    "playwright": "^1.49.1"
   }
 }

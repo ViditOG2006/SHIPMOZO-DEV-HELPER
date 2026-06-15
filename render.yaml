@@ -20,12 +20,28 @@ services:
         value: 0.0.0.0
       - key: HEADLESS
         value: "true"
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /opt/render/.cache/ms-playwright
+      - key: PLAYWRIGHT_NO_SANDBOX
+        value: "true"
       - key: PYTHON_BIN
         value: python3
       - key: PUBLIC_TUNNEL
         value: "false"
       - key: PUBLIC_BASE_URL
         value: https://shipmozo-dev-helper-1.onrender.com
+      - key: DOCS_RECORD_VIDEO
+        value: "false"
+      - key: DOCS_CAPTURE_BUDGET_S
+        value: "75"
+      - key: DOCS_CAPTURE_HEAL_ATTEMPTS
+        value: "2"
+      - key: DOCS_CAPTURE_TIMEOUT_MS
+        value: "90000"
+      - key: DOCS_VIDEO_WALKTHROUGH_S
+        value: "0"
+      - key: DOCS_CAPTURE_POST_NAV_WAIT_S
+        value: "1.5"
       - key: IMAGE_STORAGE
         value: cloudinary
       - key: OPENAI_API_KEY
