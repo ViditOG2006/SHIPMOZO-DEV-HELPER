@@ -64,6 +64,7 @@ from panel_screenshot import (
     page_has_usable_content,
     poor_screenshot_label,
     prepare_for_screenshot,
+    screenshot_kwargs,
     wait_for_loaders_gone,
     wait_for_module_content,
 )
@@ -592,7 +593,7 @@ async def save_shot(
     if docs_fast():
         filename = f"{step:02d}_{shot_id}.png"
         target = out_dir / filename
-        await page.screenshot(path=str(target), full_page=full_page)
+        await page.screenshot(path=str(target), full_page=full_page, **screenshot_kwargs())
         if module_name and not await page_ready_for_module_shot(page, module_name, description):
             try:
                 target.unlink(missing_ok=True)
@@ -627,7 +628,7 @@ async def save_shot(
 
     filename = f"{step:02d}_{shot_id}.png"
     target = out_dir / filename
-    await page.screenshot(path=str(target), full_page=full_page)
+    await page.screenshot(path=str(target), full_page=full_page, **screenshot_kwargs())
     if module_name and not await page_ready_for_module_shot(page, module_name, description):
         try:
             target.unlink(missing_ok=True)
@@ -946,7 +947,7 @@ async def _element_shot(
         await asyncio.sleep(0.3)
         filename = f"{step:02d}_{shot_id}.png"
         path = out_dir / filename
-        await target.screenshot(path=str(path))
+        await target.screenshot(path=str(path), **screenshot_kwargs())
         return (
             {
                 "id": shot_id,

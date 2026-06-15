@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 from urllib.parse import urlparse
 
@@ -10,8 +11,39 @@ from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from panel_page_state import page_looks_like_not_found, text_indicates_not_found
 
+_ON_RENDER = os.getenv("RENDER", "").lower() in {"true", "1", "yes"} or bool(
+    os.getenv("RENDER_EXTERNAL_URL", "").strip()
+)
+
 CHAT_CONTENT_TIMEOUT_S = 12
 DOC_CONTENT_TIMEOUT_S = 22
+
+
+def screenshot_timeout_ms() -> int:
+    """Playwright page.screenshot timeout; Render free tier needs more than 8s for fonts."""
+    default = "30000" if _ON_RENDER else "8000"
+    raw = os.getenv("DOCS_CAPTURE_SCREENSHOT_TIMEOUT_MS", default).strip()
+    try:
+        return max(1000, int(raw))
+    except ValueError:
+        return int(default)
+
+
+def screenshot_kwargs(**extra: object) -> dict:
+    opts: dict = {
+        "timeout": screenshot_timeout_ms(),
+        "animations": "disabled",
+    }
+    opts.update(extra)
+    return opts
+
+
+def configure_page_timeouts(page: Page) -> None:
+    """Align default action/navigation timeouts with screenshot budget on slow hosts."""
+    action_ms = screenshot_timeout_ms()
+    nav_ms = 45000 if _ON_RENDER else 15000
+    page.set_default_timeout(action_ms)
+    page.set_default_navigation_timeout(nav_ms)
 
 MODULE_READY_SELECTORS: dict[str, list[str]] = {
     "/orders/quick-add": [

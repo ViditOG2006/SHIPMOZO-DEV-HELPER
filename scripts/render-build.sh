@@ -44,6 +44,7 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 python3 -m pip install --upgrade pip
+echo "[render-build] requirements.txt playwright pin: $(grep -E '^playwright==' requirements.txt || true)"
 python3 -m pip install -r requirements.txt
 
 echo "[render-build] Installing Playwright Chromium (Python, path=$PLAYWRIGHT_BROWSERS_PATH)..."

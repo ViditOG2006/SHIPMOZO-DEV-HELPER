@@ -44,6 +44,8 @@ services:
         value: "false"
       - key: DOCS_CAPTURE_TIMEOUT_MS
         value: "90000"
+      - key: DOCS_CAPTURE_SCREENSHOT_TIMEOUT_MS
+        value: "30000"
       - key: DOCS_VIDEO_WALKTHROUGH_S
         value: "0"
       - key: DOCS_CAPTURE_POST_NAV_WAIT_S

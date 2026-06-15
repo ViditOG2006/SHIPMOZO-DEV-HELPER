@@ -15,6 +15,7 @@ from playwright.async_api import async_playwright
 
 from panel_ui_helpers import dismiss_blocking_overlays
 from panel_url import default_panel_base, login_urls
+from panel_screenshot import configure_page_timeouts, screenshot_timeout_ms
 
 E2E_FAST = os.getenv("E2E_FAST", "1").lower() in {"1", "true", "yes"}
 
@@ -215,13 +216,13 @@ async def _wait_for_login_complete(page: Page, *, timeout_s: int = LOGIN_WAIT_S)
 async def login(page: Page) -> None:
     await dismiss_blocking_overlays(page)
 
-    email_field = await first_visible(page, EMAIL_SELECTORS, timeout=8000)
+    email_field = await first_visible(page, EMAIL_SELECTORS, timeout=screenshot_timeout_ms())
     if not email_field:
         if await is_logged_in(page):
             return
         raise RuntimeError("Email/phone input not found on login page")
 
-    password_field = await first_visible(page, PASSWORD_SELECTORS, timeout=8000)
+    password_field = await first_visible(page, PASSWORD_SELECTORS, timeout=screenshot_timeout_ms())
     if not password_field:
         if await is_logged_in(page):
             return
@@ -288,7 +289,9 @@ async def _open_session(*, use_state: bool):
         context_opts["storage_state"] = str(STATE_PATH)
     context = await browser.new_context(**context_opts)
     page = await context.new_page()
-    if E2E_FAST:
+    if _ON_RENDER:
+        configure_page_timeouts(page)
+    elif E2E_FAST:
         page.set_default_timeout(8000)
         page.set_default_navigation_timeout(15000)
     else:
