@@ -5,3 +5,14 @@ output/
 output/runtime/github-tree-*.json
 bin/cloudflared
 bin/cloudflared.exe
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.pyc
+
+# OS / editor
+.DS_Store
+Thumbs.db
