@@ -7,9 +7,9 @@ npm ci
 
 echo "[render-build] Python + Playwright (panel screenshots / E2E)..."
 if command -v python3 >/dev/null 2>&1; then
-  python3 -m pip install --user --upgrade pip
-  python3 -m pip install --user -r requirements.txt
-  python3 -m playwright install chromium || echo "[render-build] WARN: playwright browser install failed"
+  python3 -m pip install --upgrade pip
+  python3 -m pip install -r requirements.txt
+  python3 -m playwright install chromium || echo "[render-build] WARN: playwright browser install failed (non-fatal)"
 else
   echo "[render-build] WARN: python3 not found - UI/API will run; screenshots/E2E need Python"
 fi
