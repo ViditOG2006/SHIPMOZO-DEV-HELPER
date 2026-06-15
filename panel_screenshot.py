@@ -7,43 +7,47 @@ import os
 import re
 from urllib.parse import urlparse
 
-from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
+from playwright.async_api import Locator, Page, TimeoutError as PlaywrightTimeoutError
 
 from panel_page_state import page_looks_like_not_found, text_indicates_not_found
 
-_ON_RENDER = os.getenv("RENDER", "").lower() in {"true", "1", "yes"} or bool(
-    os.getenv("RENDER_EXTERNAL_URL", "").strip()
-)
 
-CHAT_CONTENT_TIMEOUT_S = 12
-DOC_CONTENT_TIMEOUT_S = 22
+def is_render_deploy() -> bool:
+    return os.getenv("RENDER", "").lower() in {"true", "1", "yes"} or bool(
+        os.getenv("RENDER_EXTERNAL_URL", "").strip()
+    )
 
 
 def screenshot_timeout_ms() -> int:
-    """Playwright page.screenshot timeout; Render free tier needs more than 8s for fonts."""
-    default = "30000" if _ON_RENDER else "8000"
-    raw = os.getenv("DOCS_CAPTURE_SCREENSHOT_TIMEOUT_MS", default).strip()
-    try:
-        return max(1000, int(raw))
-    except ValueError:
-        return int(default)
+    explicit = os.getenv("DOCS_SCREENSHOT_TIMEOUT_MS", "").strip()
+    if explicit:
+        return max(8000, int(explicit))
+    if is_render_deploy():
+        return 45_000
+    return 8000
 
 
-def screenshot_kwargs(**extra: object) -> dict:
-    opts: dict = {
+def screenshot_kwargs(**extra) -> dict:
+    return {
         "timeout": screenshot_timeout_ms(),
         "animations": "disabled",
+        **extra,
     }
-    opts.update(extra)
-    return opts
 
 
-def configure_page_timeouts(page: Page) -> None:
-    """Align default action/navigation timeouts with screenshot budget on slow hosts."""
-    action_ms = screenshot_timeout_ms()
-    nav_ms = 45000 if _ON_RENDER else 15000
-    page.set_default_timeout(action_ms)
-    page.set_default_navigation_timeout(nav_ms)
+async def take_page_screenshot(page: Page, path: str, *, full_page: bool = False) -> None:
+    if is_render_deploy():
+        await asyncio.sleep(0.4)
+    await page.screenshot(path=path, full_page=full_page, **screenshot_kwargs())
+
+
+async def take_element_screenshot(locator: Locator, path: str) -> None:
+    if is_render_deploy():
+        await asyncio.sleep(0.2)
+    await locator.screenshot(path=path, **screenshot_kwargs())
+
+CHAT_CONTENT_TIMEOUT_S = 12
+DOC_CONTENT_TIMEOUT_S = 22
 
 MODULE_READY_SELECTORS: dict[str, list[str]] = {
     "/orders/quick-add": [
@@ -247,9 +251,15 @@ async def wait_for_page_ready(page: Page, *, max_wait_s: float = 10) -> dict:
 async def prepare_for_screenshot(page: Page, *, max_wait_s: float = DOC_CONTENT_TIMEOUT_S) -> tuple[bool, dict]:
     if await page_looks_like_not_found(page):
         return False, {"notFound": True}
-    if not await wait_for_module_content(page, timeout_s=max_wait_s):
+    wait_s = max_wait_s
+    if is_render_deploy():
+        wait_s = max(wait_s, 28.0)
+    if not await wait_for_module_content(page, timeout_s=wait_s):
         return False, await get_page_ui_state(page)
-    await wait_for_loaders_gone(page, timeout_s=5)
+    loader_timeout = 8.0 if is_render_deploy() else 5.0
+    await wait_for_loaders_gone(page, timeout_s=loader_timeout)
+    if is_render_deploy():
+        await asyncio.sleep(0.5)
     return True, await get_page_ui_state(page)
 
 

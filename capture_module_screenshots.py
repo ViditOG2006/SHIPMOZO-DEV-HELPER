@@ -64,7 +64,8 @@ from panel_screenshot import (
     page_has_usable_content,
     poor_screenshot_label,
     prepare_for_screenshot,
-    screenshot_kwargs,
+    take_element_screenshot,
+    take_page_screenshot,
     wait_for_loaders_gone,
     wait_for_module_content,
 )
@@ -108,7 +109,7 @@ DOCS_CAPTURE_OBSERVE_ONLY = os.getenv("DOCS_CAPTURE_OBSERVE_ONLY", "").lower() i
     "true",
     "yes",
 }
-_default_post_nav = "1.5" if _ON_RENDER else "2.5"
+_default_post_nav = "2.5"
 DOCS_CAPTURE_POST_NAV_WAIT_S = float(os.getenv("DOCS_CAPTURE_POST_NAV_WAIT_S", _default_post_nav))
 _default_video_walk = "0" if _ON_RENDER else "12"
 DOCS_VIDEO_WALKTHROUGH_S = float(os.getenv("DOCS_VIDEO_WALKTHROUGH_S", _default_video_walk))
@@ -593,7 +594,7 @@ async def save_shot(
     if docs_fast():
         filename = f"{step:02d}_{shot_id}.png"
         target = out_dir / filename
-        await page.screenshot(path=str(target), full_page=full_page, **screenshot_kwargs())
+        await take_page_screenshot(page, str(target), full_page=full_page)
         if module_name and not await page_ready_for_module_shot(page, module_name, description):
             try:
                 target.unlink(missing_ok=True)
@@ -628,7 +629,7 @@ async def save_shot(
 
     filename = f"{step:02d}_{shot_id}.png"
     target = out_dir / filename
-    await page.screenshot(path=str(target), full_page=full_page, **screenshot_kwargs())
+    await take_page_screenshot(page, str(target), full_page=full_page)
     if module_name and not await page_ready_for_module_shot(page, module_name, description):
         try:
             target.unlink(missing_ok=True)
@@ -947,7 +948,7 @@ async def _element_shot(
         await asyncio.sleep(0.3)
         filename = f"{step:02d}_{shot_id}.png"
         path = out_dir / filename
-        await target.screenshot(path=str(path), **screenshot_kwargs())
+        await take_element_screenshot(target, str(path))
         return (
             {
                 "id": shot_id,
