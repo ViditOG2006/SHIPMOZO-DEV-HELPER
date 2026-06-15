@@ -35,7 +35,11 @@ services:
       - key: DOCS_CAPTURE_BUDGET_S
         value: "75"
       - key: DOCS_CAPTURE_HEAL_ATTEMPTS
-        value: "2"
+        value: "1"
+      - key: DOCS_CAPTURE_HEAL_MCP
+        value: "false"
+      - key: PLAYWRIGHT_MCP_AUTO_START
+        value: "false"
       - key: DOCS_CAPTURE_TIMEOUT_MS
         value: "90000"
       - key: DOCS_VIDEO_WALKTHROUGH_S
