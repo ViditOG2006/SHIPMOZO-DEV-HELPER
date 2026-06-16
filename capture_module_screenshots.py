@@ -118,10 +118,30 @@ DOCS_CAPTURE_OBSERVE_ONLY = os.getenv("DOCS_CAPTURE_OBSERVE_ONLY", "").lower() i
 }
 _default_post_nav = "2.5"
 DOCS_CAPTURE_POST_NAV_WAIT_S = float(os.getenv("DOCS_CAPTURE_POST_NAV_WAIT_S", _default_post_nav))
-_default_video_walk = "0" if _ON_RENDER else "12"
+
+
+def _record_video_enabled() -> bool:
+    return os.getenv("DOCS_RECORD_VIDEO", os.getenv("RECORD_VIDEO", "")).lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+_default_video_walk = (
+    "10"
+    if _record_video_enabled()
+    else ("0" if _ON_RENDER else "12")
+)
 DOCS_VIDEO_WALKTHROUGH_S = float(os.getenv("DOCS_VIDEO_WALKTHROUGH_S", _default_video_walk))
-_default_add_order_video = "0" if _ON_RENDER else "18"
+_default_add_order_video = (
+    "14"
+    if _record_video_enabled()
+    else ("0" if _ON_RENDER else "18")
+)
 DOCS_ADD_ORDER_VIDEO_S = float(os.getenv("DOCS_ADD_ORDER_VIDEO_S", _default_add_order_video))
+
+_capture_context = None
 
 
 def docs_fast() -> bool:
@@ -507,35 +527,38 @@ async def try_direct_urls(page: Page, module_name: str, description: str = "") -
     return False
 
 
-def _record_video_enabled() -> bool:
-    return os.getenv("DOCS_RECORD_VIDEO", os.getenv("RECORD_VIDEO", "")).lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-
-
-async def finalize_doc_video(page: Page, out_dir: Path, module_name: str) -> dict | None:
+async def finalize_doc_video(
+    page: Page, context, out_dir: Path, module_name: str
+) -> dict | None:
     if not _record_video_enabled():
         return None
     try:
         video = page.video
         if not video:
+            capture_log("video finalize skip: page.video is None")
             return None
         try:
             await page.close()
         except Exception:
             pass
+        # Playwright only writes the .webm after the browser context closes.
+        try:
+            await context.close()
+        except Exception:
+            pass
         src = await video.path()
         if not src:
+            capture_log("video finalize skip: no path after context close")
             return None
         src_path = Path(src)
         if not src_path.exists():
+            capture_log(f"video finalize skip: file missing {src_path}")
             return None
         dest_dir = out_dir / "videos"
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / f"walkthrough_{slugify(module_name)}.webm"
         shutil.copy2(src_path, dest)
+        capture_log(f"video saved {dest.name} ({src_path.stat().st_size} bytes)")
         return {
             "id": f"video_{slugify(module_name)}_walkthrough",
             "label": f"Module walkthrough: {module_name}",
@@ -544,7 +567,8 @@ async def finalize_doc_video(page: Page, out_dir: Path, module_name: str) -> dic
             "type": "video/webm",
             "captured_at": datetime.now(timezone.utc).isoformat(),
         }
-    except Exception:
+    except Exception as exc:
+        capture_log(f"video finalize failed: {exc}")
         return None
 
 
@@ -555,6 +579,7 @@ async def finish_capture_bundle(
     shots: list[dict],
     *,
     description: str = "",
+    context=None,
 ) -> dict[str, list]:
     page_state: dict | None = None
     if page:
@@ -564,8 +589,9 @@ async def finish_capture_bundle(
         except Exception:
             page_state = None
     videos: list[dict] = []
-    if page:
-        vid = await finalize_doc_video(page, out_dir, module_name)
+    ctx = context or _capture_context
+    if page and ctx:
+        vid = await finalize_doc_video(page, ctx, out_dir, module_name)
         if vid:
             videos.append(vid)
     bundle: dict = {"shots": shots or [], "videos": videos}
@@ -1444,6 +1470,7 @@ async def _capture_module_general_fast(
 async def capture_module(
     session_id: str, module_name: str, out_dir: Path, description: str = ""
 ) -> dict[str, list]:
+    global _capture_context
     out_dir.mkdir(parents=True, exist_ok=True)
     shots: list[dict] = []
     p = browser = context = page = None
@@ -1459,7 +1486,11 @@ async def capture_module(
         )
         capture_log("opening browser + login…")
         p, browser, context, page = await async_login_and_save_state()
-        capture_log(f"login ok url={page.url}")
+        _capture_context = context
+        capture_log(
+            f"login ok url={page.url} video={'on' if _record_video_enabled() else 'off'} "
+            f"walkthrough={DOCS_VIDEO_WALKTHROUGH_S}s"
+        )
         post_login_url = (page.url or "").lower()
         if "profile" in post_login_url or "onboarding" in post_login_url:
             origin = await panel_origin(page)
@@ -1697,8 +1728,12 @@ async def capture_module(
             await finish_capture_bundle(page, out_dir, canonical or module_name, module_only or shots),
         )
     finally:
+        _capture_context = None
         if context:
-            await context.close()
+            try:
+                await context.close()
+            except Exception:
+                pass
         if browser:
             await browser.close()
         if p:
