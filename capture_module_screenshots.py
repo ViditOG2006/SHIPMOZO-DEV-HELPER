@@ -94,7 +94,21 @@ _ON_RENDER = os.getenv("RENDER", "").lower() in {"true", "1", "yes"} or bool(
 )
 
 DOCS_CAPTURE_FAST = os.getenv("DOCS_CAPTURE_FAST", "1").lower() in {"1", "true", "yes"}
-_default_budget = "75" if _ON_RENDER else ("120" if DOCS_CAPTURE_FAST else "120")
+
+
+def _record_video_enabled() -> bool:
+    return os.getenv("DOCS_RECORD_VIDEO", os.getenv("RECORD_VIDEO", "")).lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+_default_budget = (
+    "240"
+    if _ON_RENDER and _record_video_enabled()
+    else ("90" if _ON_RENDER else ("120" if DOCS_CAPTURE_FAST else "120"))
+)
 DOCS_CAPTURE_BUDGET_S = float(os.getenv("DOCS_CAPTURE_BUDGET_S", _default_budget))
 DOCS_CAPTURE_SINGLE_SHOT = os.getenv("DOCS_CAPTURE_SINGLE_SHOT", "").lower() in {"1", "true", "yes"}
 DOCS_CAPTURE_HEAL_ENABLED = os.getenv(
@@ -119,25 +133,24 @@ DOCS_CAPTURE_OBSERVE_ONLY = os.getenv("DOCS_CAPTURE_OBSERVE_ONLY", "").lower() i
 _default_post_nav = "2.5"
 DOCS_CAPTURE_POST_NAV_WAIT_S = float(os.getenv("DOCS_CAPTURE_POST_NAV_WAIT_S", _default_post_nav))
 
-
-def _record_video_enabled() -> bool:
-    return os.getenv("DOCS_RECORD_VIDEO", os.getenv("RECORD_VIDEO", "")).lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-
-
 _default_video_walk = (
-    "10"
-    if _record_video_enabled()
-    else ("0" if _ON_RENDER else "12")
+    "8"
+    if _ON_RENDER and _record_video_enabled()
+    else (
+        "10"
+        if _record_video_enabled()
+        else ("0" if _ON_RENDER else "12")
+    )
 )
 DOCS_VIDEO_WALKTHROUGH_S = float(os.getenv("DOCS_VIDEO_WALKTHROUGH_S", _default_video_walk))
 _default_add_order_video = (
-    "14"
-    if _record_video_enabled()
-    else ("0" if _ON_RENDER else "18")
+    "12"
+    if _ON_RENDER and _record_video_enabled()
+    else (
+        "14"
+        if _record_video_enabled()
+        else ("0" if _ON_RENDER else "18")
+    )
 )
 DOCS_ADD_ORDER_VIDEO_S = float(os.getenv("DOCS_ADD_ORDER_VIDEO_S", _default_add_order_video))
 
