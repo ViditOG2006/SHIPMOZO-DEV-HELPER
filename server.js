@@ -188,6 +188,9 @@ app.get("/api/health", (_req, res) => {
     ai: getConfigStatus(),
     cloudinary: cloudinaryConfigured(),
     imageStorage: process.env.IMAGE_STORAGE || "local",
+    panelLoginConfigured:
+      Boolean(String(process.env.SHIPMOZO_EMAIL || "").trim()) &&
+      Boolean(String(process.env.SHIPMOZO_PASSWORD || "").trim()),
   });
 });
 

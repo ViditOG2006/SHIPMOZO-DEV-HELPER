@@ -50,6 +50,8 @@ services:
         value: "0"
       - key: DOCS_CAPTURE_POST_NAV_WAIT_S
         value: "2.5"
+      - key: LOGIN_WAIT_S
+        value: "60"
       - key: IMAGE_STORAGE
         value: cloudinary
       - key: OPENAI_API_KEY

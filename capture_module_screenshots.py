@@ -1414,6 +1414,7 @@ async def capture_module(
     rate_calc = is_rate_calculator_target(module_name, description)
 
     try:
+        panel_credentials()  # fail fast before launching browser on Render
         p, browser, context, page = await async_login_and_save_state()
         await dismiss_blocking_overlays(page)
 

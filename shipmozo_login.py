@@ -17,11 +17,6 @@ from panel_ui_helpers import dismiss_blocking_overlays
 from panel_url import default_panel_base, login_urls
 
 E2E_FAST = os.getenv("E2E_FAST", "1").lower() in {"1", "true", "yes"}
-
-
-EMAIL = os.getenv("SHIPMOZO_EMAIL", "tech@shipmozo.com")
-PASSWORD = os.getenv("SHIPMOZO_PASSWORD", "12345678")
-HEADLESS = os.getenv("HEADLESS", "false").lower() in {"1", "true", "yes"}
 _ON_RENDER = os.getenv("RENDER", "").lower() in {"true", "1", "yes"} or bool(
     os.getenv("RENDER_EXTERNAL_URL", "").strip()
 )
@@ -30,11 +25,29 @@ LOGIN_URLS = login_urls()
 
 DASHBOARD_URL_HINT = "/orders/new"
 LOGIN_PATH_HINT = "/login"
-LOGIN_WAIT_S = int(os.getenv("LOGIN_WAIT_S", "30"))
+_default_login_wait = "60" if _ON_RENDER else "30"
+LOGIN_WAIT_S = int(os.getenv("LOGIN_WAIT_S", _default_login_wait))
 OUTPUT_DIR = Path("output")
 OUTPUT_DIR.mkdir(exist_ok=True)
 STATE_PATH = OUTPUT_DIR / "shipmozo-state.json"
 SCREENSHOT_PATH = OUTPUT_DIR / "shipmozo-dashboard.png"
+
+
+def panel_credentials() -> tuple[str, str]:
+    """Resolve panel login — on Render require explicit env (no local dev defaults)."""
+    email = os.getenv("SHIPMOZO_EMAIL", "").strip()
+    password = os.getenv("SHIPMOZO_PASSWORD", "").strip()
+    if _ON_RENDER:
+        if not email or not password:
+            raise RuntimeError(
+                "SHIPMOZO_EMAIL and SHIPMOZO_PASSWORD must be set in Render Environment "
+                "(Dashboard → Environment). Local .env is not used on Render."
+            )
+        return email, password
+    return email or "tech@shipmozo.com", password or "12345678"
+
+
+HEADLESS = os.getenv("HEADLESS", "false").lower() in {"1", "true", "yes"}
 
 EMAIL_SELECTORS = [
     'input[type="email"]',
@@ -153,15 +166,27 @@ async def _click_login_button(page: Page) -> None:
 
 async def _submit_login_form(page: Page, password_field) -> None:
     """Submit login — Enter on password field is most reliable for React forms."""
-    await asyncio.sleep(0.2)
+    await asyncio.sleep(0.25)
     try:
         await password_field.press("Enter")
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.8)
         if not _is_on_login_page(page.url or "") or await is_logged_in(page):
             return
     except Exception:
         pass
     await _click_login_button(page)
+    try:
+        await page.wait_for_load_state("domcontentloaded", timeout=8000)
+    except Exception:
+        pass
+    if _ON_RENDER or not E2E_FAST:
+        try:
+            await page.wait_for_url(
+                re.compile(r".*(/orders|/dashboard|/home).*", re.I),
+                timeout=min(LOGIN_WAIT_S * 1000, 45_000),
+            )
+        except Exception:
+            pass
 
 
 async def _fill_field(field, value: str) -> None:
@@ -171,24 +196,29 @@ async def _fill_field(field, value: str) -> None:
 
 async def _fill_login_credentials(page: Page, email_field, password_field) -> str:
     """
-    Fill login form. When remember-me already prefilled the email, leave it and
-    only fill password. Otherwise use SHIPMOZO_EMAIL from .env.
+    Fill login form. On Render always use SHIPMOZO_EMAIL from env.
+    Locally: when remember-me prefilled the email, leave it unless env email set.
     """
+    email, password = panel_credentials()
     prefilled = (await email_field.input_value()).strip()
-    if prefilled:
+
+    if _ON_RENDER or email:
+        await _fill_field(email_field, email)
+        use_email = email
+    elif prefilled:
         use_email = prefilled
-    elif EMAIL.strip():
-        await _fill_field(email_field, EMAIL)
-        use_email = EMAIL.strip()
     else:
         raise RuntimeError("No email on login form and SHIPMOZO_EMAIL is not set in .env")
 
     await password_field.click()
-    await password_field.fill(PASSWORD)
+    await password_field.fill(password)
 
     pwd_val = (await password_field.input_value()).strip()
     if not pwd_val:
-        raise RuntimeError("Password field empty after fill — check SHIPMOZO_PASSWORD in .env")
+        raise RuntimeError(
+            "Password field empty after fill — check SHIPMOZO_PASSWORD "
+            + ("in Render Environment" if _ON_RENDER else "in .env")
+        )
 
     return use_email
 
@@ -206,9 +236,10 @@ async def _wait_for_login_complete(page: Page, *, timeout_s: int = LOGIN_WAIT_S)
     if await is_logged_in(page):
         return
     hint = "still on login page" if _is_on_login_page(url) else f"stuck at {url}"
+    where = "Render Environment" if _ON_RENDER else ".env"
     raise RuntimeError(
         f"Login did not complete within {timeout_s}s ({hint}). "
-        "Check SHIPMOZO_EMAIL / SHIPMOZO_PASSWORD in .env."
+        f"Check SHIPMOZO_EMAIL / SHIPMOZO_PASSWORD in {where}."
     )
 
 
@@ -231,9 +262,10 @@ async def login(page: Page) -> None:
     await _submit_login_form(page, password_field)
     await _wait_for_login_complete(page)
     if not await is_logged_in(page):
+        where = "Render Environment" if _ON_RENDER else ".env"
         raise RuntimeError(
             f"Login failed for {used_email}. Current URL: {page.url}. "
-            "Verify SHIPMOZO_EMAIL and SHIPMOZO_PASSWORD in .env."
+            f"Verify SHIPMOZO_EMAIL and SHIPMOZO_PASSWORD in {where}."
         )
 
 
@@ -303,10 +335,12 @@ async def _open_session(*, use_state: bool):
 
 
 async def _attempt_login(page: Page, context) -> None:
+    panel_credentials()  # fail fast if missing on Render
     base = default_panel_base().rstrip("/")
+    nav_timeout = 45_000 if _ON_RENDER or not E2E_FAST else 15_000
     if STATE_PATH.exists():
         try:
-            await page.goto(f"{base}/orders/new", wait_until="domcontentloaded", timeout=12000)
+            await page.goto(f"{base}/orders/new", wait_until="domcontentloaded", timeout=nav_timeout)
             if await is_logged_in(page):
                 await context.storage_state(path=str(STATE_PATH))
                 return
@@ -320,7 +354,7 @@ async def _attempt_login(page: Page, context) -> None:
     login_attempted = False
     for url in urls:
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=15000 if E2E_FAST else 45000)
+            await page.goto(url, wait_until="domcontentloaded", timeout=nav_timeout)
         except Exception as exc:
             last_error = exc
             continue
