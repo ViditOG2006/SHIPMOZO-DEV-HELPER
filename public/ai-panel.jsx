@@ -4,7 +4,7 @@ const FALLBACK_PROVIDERS = [
   {
     id: "claude",
     label: "Claude (Anthropic)",
-    models: ["claude-sonnet-4-20250514", "claude-3-5-haiku-20241022", "claude-3-5-sonnet-20241022"],
+    models: ["claude-sonnet-4-5-20250929", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
     keyHint: "sk-ant-api03-...",
     docsUrl: "https://console.anthropic.com/",
   },
@@ -125,9 +125,10 @@ function AiPanel({ hideSettings = false, settingsOnly = false, onConfiguredChang
   const [config, setConfig] = useState(null);
   const [provider, setProvider] = useState("claude");
   const [apiKeyInput, setApiKeyInput] = useState("");
-  const [model, setModel] = useState("claude-sonnet-4-20250514");
+  const [model, setModel] = useState("claude-sonnet-4-5-20250929");
   const [modelOptions, setModelOptions] = useState([
-    "claude-sonnet-4-20250514",
+    "claude-sonnet-4-5-20250929",
+    "claude-3-5-sonnet-20241022",
     "claude-3-5-haiku-20241022",
   ]);
   const [messages, setMessages] = useState(loadChatMessages);

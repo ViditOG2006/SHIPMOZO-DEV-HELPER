@@ -1,7 +1,7 @@
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
-const { getConfigStatus, saveConfig, clearStoredApiKey } = require("./lib/ai-config");
+const { getConfigStatus, saveConfig, clearStoredApiKey, resolveChatProvider, resolveChatModel } = require("./lib/ai-config");
 const {
   isAiScopeEnabled,
   isChatAiEnabled,
@@ -1436,7 +1436,7 @@ async function loadSavedManualContext(req, userQuery) {
   if (!userQuery.trim()) {
     return { hasContext: false, contextText: "", sources: [], screenshots: [] };
   }
-  return buildRetrievalContext(await searchReports(userQuery));
+  return await buildRetrievalContext(await searchReports(userQuery));
 }
 
 async function appendGithubContext(system, userQuery) {
@@ -1573,12 +1573,15 @@ app.post("/api/ai/chat", async (req, res) => {
         includeHealLessons: req.body?.includeHealLessons !== false,
       });
 
+    const chatProvider = resolveChatProvider(req.body?.provider);
+    const chatModel = req.body?.model || resolveChatModel(chatProvider);
+
     const result = await callLLM({
       messages,
       system,
       maxTokens: Number(req.body?.maxTokens) || 4096,
-      model: req.body?.model,
-      provider: req.body?.provider,
+      model: chatModel,
+      provider: chatProvider,
     });
     const reply = appendScreenshotsIfMissing(result.text, allScreenshots);
     const screenshots = allScreenshots.map((s) => ({

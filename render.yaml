@@ -66,6 +66,8 @@ services:
         sync: false
       - key: AI_PROVIDER
         sync: false
+      - key: CHAT_PROVIDER
+        value: azure-openai
       - key: CLOUDINARY_CLOUD_NAME
         sync: false
       - key: CLOUDINARY_API_KEY
