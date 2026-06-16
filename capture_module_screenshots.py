@@ -105,7 +105,7 @@ def _record_video_enabled() -> bool:
 
 
 _default_budget = (
-    "240"
+    "330"
     if _ON_RENDER and _record_video_enabled()
     else ("90" if _ON_RENDER else ("120" if DOCS_CAPTURE_FAST else "120"))
 )
@@ -134,7 +134,7 @@ _default_post_nav = "2.5"
 DOCS_CAPTURE_POST_NAV_WAIT_S = float(os.getenv("DOCS_CAPTURE_POST_NAV_WAIT_S", _default_post_nav))
 
 _default_video_walk = (
-    "8"
+    "5"
     if _ON_RENDER and _record_video_enabled()
     else (
         "10"
@@ -1772,13 +1772,13 @@ async def main() -> None:
     capture_log(f"main argv session={session_id} module={module_name!r} desc_len={len(description)}")
 
     try:
+        capture_coro = capture_module(session_id, module_name, out_dir, description)
         if docs_fast():
-            bundle = await asyncio.wait_for(
-                capture_module(session_id, module_name, out_dir, description),
-                timeout=DOCS_CAPTURE_BUDGET_S,
-            )
+            # Render cold starts need headroom beyond the env budget; Node still enforces hard cap.
+            grace = 90.0 if _ON_RENDER else 0.0
+            bundle = await asyncio.wait_for(capture_coro, timeout=DOCS_CAPTURE_BUDGET_S + grace)
         else:
-            bundle = await capture_module(session_id, module_name, out_dir, description)
+            bundle = await capture_coro
         shots = bundle.get("shots") or []
         videos = bundle.get("videos") or []
         good_shots = filter_good_module_shots(shots)
@@ -1833,12 +1833,13 @@ async def main() -> None:
             )
         )
     except asyncio.TimeoutError:
-        capture_log(f"capture timed out after {DOCS_CAPTURE_BUDGET_S:.0f}s")
+        limit = DOCS_CAPTURE_BUDGET_S + (90.0 if _ON_RENDER else 0.0)
+        capture_log(f"capture timed out after {limit:.0f}s")
         print(
             json.dumps(
                 {
                     "ok": False,
-                    "error": f"Capture timed out after {DOCS_CAPTURE_BUDGET_S:.0f}s",
+                    "error": f"Capture timed out after {limit:.0f}s",
                     "screenshots": [],
                     "videos": [],
                     "fast": docs_fast(),

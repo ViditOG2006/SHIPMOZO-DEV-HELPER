@@ -33,7 +33,7 @@ services:
       - key: DOCS_RECORD_VIDEO
         value: "true"
       - key: DOCS_CAPTURE_BUDGET_S
-        value: "240"
+        value: "330"
       - key: DOCS_CAPTURE_HEAL_ENABLED
         value: "false"
       - key: DOCS_CAPTURE_HEAL_ATTEMPTS
@@ -43,15 +43,15 @@ services:
       - key: PLAYWRIGHT_MCP_AUTO_START
         value: "false"
       - key: DOCS_CAPTURE_TIMEOUT_MS
-        value: "360000"
+        value: "450000"
       - key: DOCS_SCREENSHOT_TIMEOUT_MS
         value: "45000"
       - key: DOCS_VIDEO_WALKTHROUGH_S
-        value: "8"
+        value: "5"
       - key: DOCS_CAPTURE_POST_NAV_WAIT_S
-        value: "2.5"
+        value: "1.5"
       - key: LOGIN_WAIT_S
-        value: "60"
+        value: "45"
       - key: IMAGE_STORAGE
         value: cloudinary
       - key: REPORT_STORAGE
