@@ -175,7 +175,23 @@ async def run_pre_capture_heal_loop(
             return {"ok": True, "observation": last_obs, "attempts": attempt}
 
         if not docs_capture_heal_enabled():
-            capture_log("inline heal disabled — stopping pre-capture loop")
+            capture_log("inline heal disabled — trying direct module navigation")
+            if is_rate_calculator_target(module_name, description):
+                await navigate_to_rate_calculator(page)
+            elif is_channel_target(module_name, description):
+                await navigate_channel_to_target(page, module_name, description)
+            elif is_add_order_target(module_name, description):
+                await navigate_to_add_order_form(page, module_name, description)
+            elif is_new_orders_target(module_name, description):
+                origin = await panel_origin(page)
+                await goto_new_orders_domestic(page, origin)
+            else:
+                await navigate_module_via_quick_search(page, module_name, description)
+            await _pause(0.8)
+            last_obs = await build_page_state(page, module_name, description)
+            if last_obs.get("moduleVerified"):
+                capture_log("direct navigation verified module")
+                return {"ok": True, "observation": last_obs, "attempts": attempt}
             break
 
         healed = await heal_navigation_for_module(page, module_name, description, canonical)
@@ -1478,6 +1494,14 @@ async def capture_module(
             }
 
         if rate_calc:
+            capture_log("capture path: rate_calculator")
+            if not await page_ready_for_module_shot(page, module_name, description):
+                capture_log("pre-navigate to Rate Calculator")
+                await dismiss_blocking_overlays(page)
+                nav_ok = await navigate_to_rate_calculator(page)
+                capture_log(f"navigate_to_rate_calculator -> {nav_ok} url={page.url}")
+                if not nav_ok:
+                    await quick_search_to_rate_calculator(page)
             loop = await run_pre_capture_heal_loop(page, module_name, description, canonical)
             if not loop.get("ok"):
                 await dismiss_blocking_overlays(page)

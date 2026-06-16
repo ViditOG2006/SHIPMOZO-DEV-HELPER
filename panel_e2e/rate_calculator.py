@@ -79,40 +79,90 @@ async def _page_haystack(page: Page) -> str:
         return ""
 
 
+async def _rate_calculator_body_verified(page: Page) -> bool:
+    """Strict check: pincode fields + calculate action visible (not just Domestic/International tabs)."""
+    try:
+        text = (
+            await page.evaluate(
+                "() => (document.body?.innerText || '').replace(/\\s+/g, ' ').slice(0, 4000).toLowerCase()"
+            )
+            or ""
+        )
+    except Exception:
+        return False
+    has_pincode = any(
+        t in text
+        for t in (
+            "pincode",
+            "origin pincode",
+            "delivery area pincode",
+            "delivery pincode",
+            "pickup pincode",
+        )
+    )
+    return has_pincode and "calculate" in text
+
+
 async def _on_rate_calculator_page(page: Page) -> bool:
+    url = (page.url or "").lower()
     if url_looks_like_broken_nav(page.url or ""):
         return False
     if await page_looks_like_not_found(page):
         return False
+    # Orders/shipment list pages also show Domestic/International — not Rate Calculator.
+    if "/orders/" in url and "rate-calculator" not in url:
+        return False
+    if "/orders/new" in url or "/orders/add" in url:
+        return False
+
     hay = await _page_haystack(page)
     if not hay:
         return False
-    markers = _rate_calc_markers()
-    hits = sum(1 for m in markers if m in hay)
-    on_dashboard = "analytics" in hay and "wallet transactions" in hay and hits < 2
+
+    pincode_markers = (
+        "origin pincode",
+        "delivery area pincode",
+        "delivery pincode",
+        "pickup pincode",
+    )
+    form_markers = (
+        "approximate weight",
+        "shipment price list",
+        "package type",
+        "invoice value",
+    )
+    pincode_hits = sum(1 for m in pincode_markers if m in hay)
+    form_hits = sum(1 for m in form_markers if m in hay)
+
+    if "rate-calculator" in url or "rate_calculator" in url:
+        return pincode_hits >= 1 or (form_hits >= 1 and "calculate" in hay)
+
+    on_dashboard = "analytics" in hay and "wallet transactions" in hay and pincode_hits < 1
     if on_dashboard:
         return False
-    if hits >= 2:
+
+    if pincode_hits >= 2 and "calculate" in hay:
         return True
-    if hits >= 1 and ("calculate" in hay or "international" in hay):
+    if pincode_hits >= 1 and form_hits >= 1 and "calculate" in hay:
         return True
     return False
 
 
 async def quick_search_to_rate_calculator(page: Page) -> bool:
     """Fast path: Ctrl+B only — no URL fallbacks that 404 on manage-courier."""
-    if await _on_rate_calculator_page(page):
+    if await _on_rate_calculator_page(page) and await _rate_calculator_body_verified(page):
         return True
     await dismiss_blocking_overlays(page)
+    timeout_s = 8.0 if os.getenv("RENDER") else QUICK_SEARCH_TIMEOUT_S
     for query in ("rate calculator", "Rate Calculator"):
         if await navigate_via_quick_search(
             page,
             query,
-            verify_fn=_on_rate_calculator_page,
-            timeout_s=QUICK_SEARCH_TIMEOUT_S,
+            verify_fn=_rate_calculator_body_verified,
+            timeout_s=timeout_s,
         ):
             return True
-        if await _on_rate_calculator_page(page):
+        if await _on_rate_calculator_page(page) and await _rate_calculator_body_verified(page):
             return True
     return False
 
