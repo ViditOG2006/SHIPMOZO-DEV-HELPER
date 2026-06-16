@@ -29,7 +29,7 @@ const {
   getTestcaseGenJob,
 } = require("./lib/testcase-gen-job-store");
 const { storeScreenshotBatch, storeVideoBatch, CLOUD_ROOT } = require("./lib/image-storage");
-const { saveReport, listReports, getReport, deleteReport } = require("./lib/report-archive");
+const { saveReport, listReports, getReport, deleteReport, warmupReportArchive, cloudReportsEnabled } = require("./lib/report-archive");
 const {
   searchReports,
   buildRetrievalContext,
@@ -191,6 +191,7 @@ app.get("/api/health", (_req, res) => {
     panelLoginConfigured:
       Boolean(String(process.env.SHIPMOZO_EMAIL || "").trim()) &&
       Boolean(String(process.env.SHIPMOZO_PASSWORD || "").trim()),
+    reportStorage: cloudReportsEnabled() ? "cloudinary" : "local",
   });
 });
 
@@ -248,9 +249,9 @@ app.post("/api/ai/test", async (req, res) => {
   }
 });
 
-app.post("/api/app/clear-data", (_req, res) => {
+app.post("/api/app/clear-data", async (_req, res) => {
   try {
-    res.json(clearAllAppData());
+    res.json(await clearAllAppData());
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1198,45 +1199,65 @@ app.post("/api/testing/generate-from-docs", async (req, res) => {
   }
 });
 
-app.get("/api/reports", (_req, res) => {
-  res.json({ ok: true, reports: listReports() });
+app.get("/api/reports", async (_req, res) => {
+  try {
+    res.json({ ok: true, reports: await listReports() });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
 });
 
-app.get("/api/reports/search", (req, res) => {
+app.get("/api/reports/search", async (req, res) => {
   const q = String(req.query.q || "").trim();
   if (!q) {
     res.status(400).json({ error: "q query parameter is required" });
     return;
   }
-  const result = searchReports(q);
-  const retrieval = buildRetrievalContext(result);
-  res.json({ ok: true, ...result, retrieval });
-});
-
-app.get("/api/reports/:sessionId", (req, res) => {
-  const report = getReport(req.params.sessionId);
-  if (!report) {
-    res.status(404).json({ error: "Report not found" });
-    return;
+  try {
+    const result = await searchReports(q);
+    const retrieval = await buildRetrievalContext(result);
+    res.json({ ok: true, ...result, retrieval });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
   }
-  res.json({ ok: true, report });
 });
 
-function handleDeleteReport(sessionId, res) {
+app.get("/api/reports/:sessionId", async (req, res) => {
+  try {
+    const report = await getReport(req.params.sessionId);
+    if (!report) {
+      res.status(404).json({ error: "Report not found" });
+      return;
+    }
+    res.json({ ok: true, report });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+async function handleDeleteReport(sessionId, res) {
   if (!sessionId) {
     res.status(400).json({ error: "sessionId is required" });
     return;
   }
-  deleteReport(sessionId);
+  await deleteReport(sessionId);
   res.json({ ok: true, sessionId });
 }
 
-app.delete("/api/reports/:sessionId", (req, res) => {
-  handleDeleteReport(String(req.params.sessionId || "").trim(), res);
+app.delete("/api/reports/:sessionId", async (req, res) => {
+  try {
+    await handleDeleteReport(String(req.params.sessionId || "").trim(), res);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
 });
 
-app.post("/api/reports/delete", (req, res) => {
-  handleDeleteReport(String(req.body?.sessionId || "").trim(), res);
+app.post("/api/reports/delete", async (req, res) => {
+  try {
+    await handleDeleteReport(String(req.body?.sessionId || "").trim(), res);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
 });
 
 app.post("/api/reports/save", async (req, res) => {
@@ -1404,12 +1425,12 @@ app.post("/api/docs/generate-module", async (req, res) => {
 async function loadSavedManualContext(req, userQuery) {
   const reportSessionId = String(req.body?.reportSessionId || "").trim();
   if (reportSessionId) {
-    return buildRetrievalContextForSession(reportSessionId, userQuery);
+    return await buildRetrievalContextForSession(reportSessionId, userQuery);
   }
   if (!userQuery.trim()) {
     return { hasContext: false, contextText: "", sources: [], screenshots: [] };
   }
-  return buildRetrievalContext(searchReports(userQuery));
+  return buildRetrievalContext(await searchReports(userQuery));
 }
 
 async function appendGithubContext(system, userQuery) {
@@ -1453,9 +1474,9 @@ async function buildChatContext({ req, messages, useLivePanel, preloadedBrowse, 
         manualRetrieval = { hasContext: false, contextText: "", sources: [], screenshots: [] };
         usedSavedManual = false;
       } else if (!manualRetrieval.hasContext) {
-        const searchResult = searchReports(userQuery);
+        const searchResult = await searchReports(userQuery);
         if (searchResult.hits.length > 0) {
-          manualRetrieval = buildRetrievalContext(searchResult);
+          manualRetrieval = await buildRetrievalContext(searchResult);
           usedSavedManual = manualRetrieval.hasContext;
         }
       }
@@ -1622,6 +1643,12 @@ clearRuntimePublicUrl();
 ensurePlaywrightBrowsersOnStartup().catch((err) => {
   console.error("[playwright] startup ensure failed:", err.message);
 });
+
+warmupReportArchive()
+  .then((info) => {
+    if (info.cloud) console.log(`[reports] cloud manifest loaded (${info.count} reports)`);
+  })
+  .catch((err) => console.warn("[reports] warmup failed:", err.message));
 
 const server = app.listen(port, host, () => {
   const localUrl = getLocalBaseUrl();

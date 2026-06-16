@@ -781,7 +781,7 @@ async def navigate_to_add_order_form(
         return ok
 
     if docs_capture_allow_order_form_url() or allow_direct_urls():
-        origin = panel_origin()
+        origin = await panel_origin(page)
         for url in (
             f"{origin}/orders/add?type=DOM",
             f"{origin}/orders/add",
@@ -1275,7 +1275,7 @@ async def _capture_new_orders_fast(
 ) -> dict[str, list]:
     shots: list[dict] = []
     step = 0
-    origin = panel_origin()
+    origin = await panel_origin(page)
 
     await goto_new_orders_domestic(page, origin)
     await dismiss_blocking_overlays(page)

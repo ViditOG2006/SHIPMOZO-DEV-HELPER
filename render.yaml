@@ -54,6 +54,8 @@ services:
         value: "60"
       - key: IMAGE_STORAGE
         value: cloudinary
+      - key: REPORT_STORAGE
+        value: cloudinary
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENROUTER_API_KEY

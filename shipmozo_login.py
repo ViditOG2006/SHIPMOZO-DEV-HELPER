@@ -120,9 +120,12 @@ def _is_on_login_page(url: str) -> bool:
 async def is_logged_in(page: Page) -> bool:
     try:
         url = page.url or ""
+        low = url.lower()
         if _is_on_login_page(url):
             return False
         if DASHBOARD_URL_HINT in url:
+            return True
+        if "/profile" in low or "/onboarding" in low:
             return True
         if not E2E_FAST:
             await page.wait_for_load_state("domcontentloaded")
@@ -139,6 +142,21 @@ async def is_logged_in(page: Page) -> bool:
     except Exception:
         pass
     return False
+
+
+async def _leave_post_login_interstitials(page: Page) -> None:
+    """Skip profile-completion / onboarding after successful auth."""
+    low = (page.url or "").lower()
+    if "profile" not in low and "onboarding" not in low:
+        return
+    base = default_panel_base().rstrip("/")
+    target = f"{base}/orders/new"
+    e2e_log("login", f"leaving interstitial — goto {target}")
+    try:
+        await page.goto(target, wait_until="domcontentloaded", timeout=45_000 if _ON_RENDER else 20_000)
+        await dismiss_blocking_overlays(page)
+    except Exception as exc:
+        e2e_log("login", f"interstitial skip failed: {exc}")
 
 
 async def _click_login_button(page: Page) -> None:
@@ -311,6 +329,8 @@ async def login(page: Page) -> None:
             await _submit_login_form(page, password_field)
 
     await _wait_for_login_complete(page)
+    if await is_logged_in(page):
+        await _leave_post_login_interstitials(page)
     if not await is_logged_in(page):
         where = "Render Environment" if _ON_RENDER else ".env"
         raise RuntimeError(
@@ -394,6 +414,7 @@ async def _attempt_login(page: Page, context) -> None:
             await page.goto(f"{base}/orders/new", wait_until="domcontentloaded", timeout=nav_timeout)
             if await is_logged_in(page):
                 e2e_log("login", f"session restored via saved state url={page.url}")
+                await _leave_post_login_interstitials(page)
                 await context.storage_state(path=str(STATE_PATH))
                 return
         except Exception:
@@ -433,6 +454,7 @@ async def _attempt_login(page: Page, context) -> None:
             await login(page)
             if await is_logged_in(page):
                 e2e_log("login", f"success url={page.url}")
+                await _leave_post_login_interstitials(page)
                 await context.storage_state(path=str(STATE_PATH))
                 return
         except Exception as exc:
