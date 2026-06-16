@@ -79,7 +79,7 @@ from panel_e2e.docs_capture_heal import (
 from panel_e2e.page_observe import capture_page_observation
 from shipmozo_login import HEADLESS, LOGIN_URLS
 from shipmozo_login import async_login_and_save_state
-from shipmozo_login import first_visible, is_logged_in
+from shipmozo_login import first_visible, is_logged_in, panel_credentials
 
 PANEL_BASE = LOGIN_URLS[0].rstrip("/")
 
