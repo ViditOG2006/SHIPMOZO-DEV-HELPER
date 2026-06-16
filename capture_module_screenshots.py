@@ -56,7 +56,8 @@ from panel_e2e.rate_calculator import (
     quick_search_to_rate_calculator,
 )
 from panel_quick_search import navigate_module_via_quick_search
-from panel_ui_helpers import dismiss_blocking_overlays
+from panel_ui_helpers import dismiss_blocking_overlays, page_has_blocking_dialog
+from panel_orders import goto_new_orders_domestic
 from panel_navigation import is_junk_nav_label, load_navigation_map, merge_page_lists, rank_pages_for_module
 from panel_navigate import navigate_for_chat, navigate_module_via_nav_map, page_looks_like_not_found
 from panel_screenshot import (
@@ -591,6 +592,17 @@ async def save_shot(
     if module_name and not await page_ready_for_module_shot(page, module_name, description):
         return None
 
+    await dismiss_blocking_overlays(page)
+    if await page_has_blocking_dialog(page):
+        return {
+            "id": shot_id,
+            "label": label,
+            "step": step,
+            "rejected": True,
+            "rejectReason": "blocking confirmation dialog (unsaved changes)",
+            "url": page.url,
+        }
+
     if docs_fast():
         filename = f"{step:02d}_{shot_id}.png"
         target = out_dir / filename
@@ -746,28 +758,42 @@ async def navigate_to_add_order_form(
         ok, _ = await verify_module_target(p, module_name, description)
         return ok
 
+    if docs_capture_allow_order_form_url() or allow_direct_urls():
+        origin = panel_origin()
+        for url in (
+            f"{origin}/orders/add?type=DOM",
+            f"{origin}/orders/add",
+            f"{origin}/orders/quick-add",
+        ):
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=_nav_timeout_ms())
+                await dismiss_blocking_overlays(page)
+                await _pause(DOCS_CAPTURE_POST_NAV_WAIT_S)
+                await wait_for_module_content(page, timeout_s=10.0 if docs_fast() else 18.0)
+                if await _verified(page) and not await page_has_blocking_dialog(page):
+                    return True
+            except Exception:
+                continue
+
     quick = await navigate_module_via_quick_search(
         page, module_name, description, verify_fn=_verified, timeout_s=6.0 if docs_fast() else 10.0
     )
     if quick.get("ok") and await _verified(page):
+        await dismiss_blocking_overlays(page)
         await _pause(DOCS_CAPTURE_POST_NAV_WAIT_S)
         await wait_for_module_content(page, timeout_s=10.0 if docs_fast() else 18.0)
-        return True
+        return not await page_has_blocking_dialog(page)
 
     if docs_capture_use_nav_map():
         nav = await navigate_module_via_nav_map(
             page, module_name, description, verify_fn=_verified, max_pages=4
         )
         if nav.get("ok") and await _verified(page):
+            await dismiss_blocking_overlays(page)
             await _pause(DOCS_CAPTURE_POST_NAV_WAIT_S)
             await wait_for_module_content(page, timeout_s=10.0 if docs_fast() else 18.0)
-            return True
+            return not await page_has_blocking_dialog(page)
 
-    if docs_capture_allow_order_form_url() or allow_direct_urls():
-        if await try_direct_urls(page, module_name, description):
-            await _pause(DOCS_CAPTURE_POST_NAV_WAIT_S)
-            await wait_for_module_content(page, timeout_s=10.0 if docs_fast() else 18.0)
-            return await _verified(page)
     return False
 
 
@@ -1127,21 +1153,20 @@ async def _capture_add_order_fast(
     shots: list[dict] = []
     step = 0
 
-    loop = await run_pre_capture_heal_loop(page, module_name, description, canonical)
-    if not loop.get("ok"):
-        await navigate_to_add_order_form(page, module_name, description)
-        if not await page_ready_for_module_shot(page, module_name, description) and docs_capture_use_nav_map():
-            await navigate_module_via_nav_map(page, module_name, description, max_pages=4)
-        await run_pre_capture_heal_loop(page, module_name, description, canonical)
+    await navigate_to_add_order_form(page, module_name, description)
+    if not await page_ready_for_module_shot(page, module_name, description) and docs_capture_use_nav_map():
+        await navigate_module_via_nav_map(page, module_name, description, max_pages=4)
+        await dismiss_blocking_overlays(page)
 
     if await page_ready_for_module_shot(page, module_name, description):
+        await dismiss_blocking_overlays(page)
         await _pause(DOCS_CAPTURE_POST_NAV_WAIT_S)
         await wait_for_module_content(page, timeout_s=12.0 if docs_fast() else 20.0)
         main = await save_shot(
             page,
             out_dir,
             f"module_{slugify(canonical)}_add_order",
-            f"Module view: {canonical}",
+            f"Add Order form — overview",
             step + 1,
             content_ready=True,
             fast_e2e=True,
@@ -1154,14 +1179,112 @@ async def _capture_add_order_fast(
 
         if not single_shot_mode():
             form_specs = [
-                ("add_order_form_top", "Add Order form — top section", 0),
-                ("add_order_form_mid", "Add Order form — customer details", 400),
-                ("add_order_form_bottom", "Add Order form — package & save", 800),
+                ("add_order_buyer", "Add Order — buyer / receiver details", 'text=Buyer', 'text=Receiver', 'text=Phone'),
+                ("add_order_product", "Add Order — product & SKU section", 'text=Product', 'text=SKU', 'text=Quantity'),
+                ("add_order_shipping", "Add Order — shipping & payment", 'text=Shipping', 'text=Payment', 'text=Create'),
             ]
-            for shot_id, label, scroll_y in form_specs:
+            for shot_id, label, *anchors in form_specs:
+                await dismiss_blocking_overlays(page)
+                scrolled = False
+                for anchor in anchors:
+                    try:
+                        text_val = anchor.replace("text=", "")
+                        loc = page.get_by_text(re.compile(re.escape(text_val), re.I)).first
+                        if await loc.count() > 0 and await loc.is_visible():
+                            await loc.scroll_into_view_if_needed(timeout=3000)
+                            await asyncio.sleep(0.5 if docs_fast() else 0.9)
+                            scrolled = True
+                            break
+                    except Exception:
+                        continue
+                if not scrolled:
+                    try:
+                        await page.evaluate("(i) => window.scrollTo({ top: 320 * i, behavior: 'instant' })", len(shots))
+                        await asyncio.sleep(0.5)
+                    except Exception:
+                        pass
+                extra = await save_shot(
+                    page,
+                    out_dir,
+                    shot_id,
+                    label,
+                    step + 1,
+                    content_ready=True,
+                    fast_e2e=True,
+                    module_name=module_name,
+                    description=description,
+                )
+                if extra and not extra.get("rejected"):
+                    shots.append(extra)
+                    step = extra["step"]
+
+    if not filter_good_module_shots(shots):
+        await navigate_to_add_order_form(page, module_name, description)
+        await dismiss_blocking_overlays(page)
+        healed = await save_shot(
+            page,
+            out_dir,
+            f"module_{slugify(canonical)}_healed",
+            f"Add Order form (retry)",
+            step + 1,
+            content_ready=True,
+            fast_e2e=True,
+            module_name=module_name,
+            description=description,
+        )
+        if healed and not healed.get("rejected"):
+            shots.append(healed)
+
+    module_shots = filter_good_module_shots(shots)
+    return await _finalize_bundle(
+        page,
+        await finish_capture_bundle(page, out_dir, canonical or module_name, module_shots, description=description),
+        module_name=module_name,
+        description=description,
+    )
+
+
+async def _capture_new_orders_fast(
+    page: Page,
+    out_dir: Path,
+    module_name: str,
+    description: str,
+    canonical: str,
+) -> dict[str, list]:
+    shots: list[dict] = []
+    step = 0
+    origin = panel_origin()
+
+    await goto_new_orders_domestic(page, origin)
+    await dismiss_blocking_overlays(page)
+    await _pause(DOCS_CAPTURE_POST_NAV_WAIT_S)
+    await wait_for_module_content(page, timeout_s=12.0 if docs_fast() else 20.0)
+
+    if await page_ready_for_module_shot(page, module_name, description):
+        main = await save_shot(
+            page,
+            out_dir,
+            f"module_{slugify(canonical)}_list",
+            "New Orders list — overview",
+            step + 1,
+            content_ready=True,
+            fast_e2e=True,
+            module_name=module_name,
+            description=description,
+        )
+        if main and not main.get("rejected"):
+            shots.append(main)
+            step = main["step"]
+
+        if not single_shot_mode():
+            for shot_id, label, scroll_y in (
+                ("new_orders_filters", "New Orders — filters & tabs", 0),
+                ("new_orders_table", "New Orders — order table", 450),
+            ):
+                await dismiss_blocking_overlays(page)
                 try:
                     await page.evaluate("(y) => window.scrollTo({ top: y, behavior: 'instant' })", scroll_y)
-                    await asyncio.sleep(0.6 if docs_fast() else 1.2)
+                    await asyncio.sleep(0.6 if docs_fast() else 1.0)
                 except Exception:
                     pass
                 extra = await save_shot(
@@ -1180,21 +1303,22 @@ async def _capture_add_order_fast(
                     step = extra["step"]
 
     if not filter_good_module_shots(shots):
-        await navigate_to_add_order_form(page, module_name, description)
-        await run_pre_capture_heal_loop(page, module_name, description, canonical)
-        healed = await save_shot(
-            page,
-            out_dir,
-            f"module_{slugify(canonical)}_healed",
-            f"Module view: {canonical} (healed)",
-            step + 1,
-            content_ready=True,
-            fast_e2e=True,
-            module_name=module_name,
-            description=description,
-        )
-        if healed and not healed.get("rejected"):
-            shots.append(healed)
+        quick = await navigate_module_via_quick_search(page, module_name, description)
+        if quick.get("ok"):
+            await dismiss_blocking_overlays(page)
+            healed = await save_shot(
+                page,
+                out_dir,
+                f"module_{slugify(canonical)}_healed",
+                "New Orders list (retry)",
+                step + 1,
+                content_ready=True,
+                fast_e2e=True,
+                module_name=module_name,
+                description=description,
+            )
+            if healed and not healed.get("rejected"):
+                shots.append(healed)
 
     module_shots = filter_good_module_shots(shots)
     return await _finalize_bundle(
@@ -1341,6 +1465,10 @@ async def capture_module(
         if docs_fast():
             if is_channel_target(module_name, description):
                 return await _capture_channel_fast(
+                    page, out_dir, module_name, description, canonical
+                )
+            if is_new_orders_target(module_name, description):
+                return await _capture_new_orders_fast(
                     page, out_dir, module_name, description, canonical
                 )
             if is_add_order_target(module_name, description):

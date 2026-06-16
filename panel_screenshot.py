@@ -249,6 +249,11 @@ async def wait_for_page_ready(page: Page, *, max_wait_s: float = 10) -> dict:
 
 
 async def prepare_for_screenshot(page: Page, *, max_wait_s: float = DOC_CONTENT_TIMEOUT_S) -> tuple[bool, dict]:
+    from panel_ui_helpers import dismiss_blocking_overlays, page_has_blocking_dialog
+
+    await dismiss_blocking_overlays(page)
+    if await page_has_blocking_dialog(page):
+        return False, {"blockingDialog": True}
     if await page_looks_like_not_found(page):
         return False, {"notFound": True}
     wait_s = max_wait_s

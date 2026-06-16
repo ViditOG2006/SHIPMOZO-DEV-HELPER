@@ -23,7 +23,7 @@ from panel_e2e.rate_calculator import _on_rate_calculator_page
 from panel_navigate import page_looks_like_not_found
 from panel_page_state import url_looks_like_broken_nav
 from panel_screenshot import has_module_anchor, wait_for_module_content
-from panel_ui_helpers import dismiss_blocking_overlays
+from panel_ui_helpers import dismiss_blocking_overlays, page_has_blocking_dialog
 from panel_quick_search import navigate_module_via_quick_search
 
 
@@ -59,6 +59,8 @@ async def verify_module_target(
 ) -> tuple[bool, str]:
     if await page_looks_like_not_found(page):
         return False, "404 or not-found page"
+    if await page_has_blocking_dialog(page):
+        return False, "blocking confirmation dialog (unsaved changes)"
     if url_looks_like_broken_nav(page.url or ""):
         return False, f"broken route: {page.url}"
     if url_is_manage_courier_trap(page.url or ""):
