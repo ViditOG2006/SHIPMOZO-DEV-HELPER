@@ -105,9 +105,9 @@ def _record_video_enabled() -> bool:
 
 
 _default_budget = (
-    "330"
-    if _ON_RENDER and _record_video_enabled()
-    else ("90" if _ON_RENDER else ("120" if DOCS_CAPTURE_FAST else "120"))
+    "180"
+    if _ON_RENDER
+    else ("120" if DOCS_CAPTURE_FAST else "120")
 )
 DOCS_CAPTURE_BUDGET_S = float(os.getenv("DOCS_CAPTURE_BUDGET_S", _default_budget))
 DOCS_CAPTURE_SINGLE_SHOT = os.getenv("DOCS_CAPTURE_SINGLE_SHOT", "").lower() in {"1", "true", "yes"}
@@ -1774,8 +1774,7 @@ async def main() -> None:
     try:
         capture_coro = capture_module(session_id, module_name, out_dir, description)
         if docs_fast():
-            # Render cold starts need headroom beyond the env budget; Node still enforces hard cap.
-            grace = 90.0 if _ON_RENDER else 0.0
+            grace = 30.0 if _ON_RENDER else 0.0
             bundle = await asyncio.wait_for(capture_coro, timeout=DOCS_CAPTURE_BUDGET_S + grace)
         else:
             bundle = await capture_coro

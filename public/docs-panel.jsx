@@ -241,7 +241,7 @@ function DocsPanel({ configured, model, provider, onBusyChange, onGoToTesting })
       let shotWarning = null;
 
       if (!backendOnly) {
-      setStep(`Step 2/${totalSteps}: Capturing screenshots & screen recording…`);
+      setStep(`Step 2/${totalSteps}: Capturing screenshots…`);
       try {
         const shotStart = await window.DevHelperApi.fetchJson("/api/docs/screenshots/start", {
           method: "POST",
@@ -258,7 +258,7 @@ function DocsPanel({ configured, model, provider, onBusyChange, onGoToTesting })
         while (Date.now() - pollStarted < maxWaitMs) {
           await new Promise((r) => setTimeout(r, pollMs));
           const sec = Math.floor((Date.now() - pollStarted) / 1000);
-          setStep(`Step 2/3: Capturing screenshots & video… (${sec}s)`);
+          setStep(`Step 2/3: Capturing screenshots… (${sec}s)`);
           try {
             const status = await window.DevHelperApi.fetchJson(
               `/api/docs/screenshots/status/${jobId}`,
@@ -394,7 +394,7 @@ function DocsPanel({ configured, model, provider, onBusyChange, onGoToTesting })
           <div>
             <h2>Generate documentation</h2>
             <p className="hint" style={{ marginTop: 4 }}>
-              Technical PRD (Claude) + user manual (OpenAI) with live screenshots & video
+              Technical PRD (Claude) + user manual (OpenAI) with live screenshots
             </p>
           </div>
           {sessionId && <span className="badge badge-muted">{sessionId}</span>}
