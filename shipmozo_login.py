@@ -191,37 +191,76 @@ async def _submit_login_form(page: Page, password_field) -> None:
 
 
 async def _fill_field(field, value: str) -> None:
-    await field.click()
-    await field.fill(value)
+    """Clear React-controlled inputs then fill."""
+    await field.click(timeout=5000)
+    try:
+        await field.press("Control+a")
+    except Exception:
+        pass
+    try:
+        await field.fill("")
+        await field.fill(value)
+    except Exception:
+        await field.press_sequentially(value, delay=30)
+    filled = (await field.input_value()).strip()
+    if filled != value.strip() and value.strip():
+        await field.evaluate(
+            "(el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); }",
+            value,
+        )
+
+
+async def _find_login_fields(page: Page):
+    timeout = 15_000 if _ON_RENDER else 8_000
+    email_field = await first_visible(page, EMAIL_SELECTORS, timeout=timeout)
+    if not email_field:
+        for pat in (
+            re.compile(r"email", re.I),
+            re.compile(r"phone", re.I),
+            re.compile(r"username", re.I),
+        ):
+            try:
+                loc = page.get_by_placeholder(pat)
+                if await loc.count() > 0:
+                    email_field = loc.first
+                    await email_field.wait_for(state="visible", timeout=3000)
+                    break
+            except Exception:
+                continue
+    password_field = await first_visible(page, PASSWORD_SELECTORS, timeout=timeout)
+    if not password_field:
+        try:
+            loc = page.get_by_placeholder(re.compile(r"password", re.I))
+            if await loc.count() > 0:
+                password_field = loc.first
+        except Exception:
+            pass
+    return email_field, password_field
 
 
 async def _fill_login_credentials(page: Page, email_field, password_field) -> str:
-    """
-    Fill login form. On Render always use SHIPMOZO_EMAIL from env.
-    Locally: when remember-me prefilled the email, leave it unless env email set.
-    """
+    """Always type SHIPMOZO_EMAIL / SHIPMOZO_PASSWORD from env (never rely on remember-me)."""
     email, password = panel_credentials()
-    prefilled = (await email_field.input_value()).strip()
+    e2e_log("login", f"filling credentials for {email}")
 
-    if _ON_RENDER or email:
-        await _fill_field(email_field, email)
-        use_email = email
-    elif prefilled:
-        use_email = prefilled
-    else:
-        raise RuntimeError("No email on login form and SHIPMOZO_EMAIL is not set in .env")
+    await _fill_field(email_field, email)
+    await _fill_field(password_field, password)
 
-    await password_field.click()
-    await password_field.fill(password)
-
+    email_val = (await email_field.input_value()).strip()
     pwd_val = (await password_field.input_value()).strip()
+    if not email_val:
+        raise RuntimeError(
+            "Email field empty after fill — check SHIPMOZO_EMAIL "
+            + ("in Render Environment" if _ON_RENDER else "in .env")
+        )
     if not pwd_val:
         raise RuntimeError(
             "Password field empty after fill — check SHIPMOZO_PASSWORD "
             + ("in Render Environment" if _ON_RENDER else "in .env")
         )
 
-    return use_email
+    e2e_log("login", f"credentials filled email_len={len(email_val)} pwd_len={len(pwd_val)}")
+    return email_val
 
 
 async def _wait_for_login_complete(page: Page, *, timeout_s: int = LOGIN_WAIT_S) -> None:
@@ -249,13 +288,12 @@ async def login(page: Page) -> None:
     e2e_log("login", f"fill login form url={page.url}")
     await dismiss_blocking_overlays(page)
 
-    email_field = await first_visible(page, EMAIL_SELECTORS, timeout=8000)
+    email_field, password_field = await _find_login_fields(page)
     if not email_field:
         if await is_logged_in(page):
             return
         raise RuntimeError("Email/phone input not found on login page")
 
-    password_field = await first_visible(page, PASSWORD_SELECTORS, timeout=8000)
     if not password_field:
         if await is_logged_in(page):
             return
@@ -264,6 +302,14 @@ async def login(page: Page) -> None:
     used_email = await _fill_login_credentials(page, email_field, password_field)
     e2e_log("login", f"submitting for {used_email}")
     await _submit_login_form(page, password_field)
+
+    if _is_on_login_page(page.url or "") and not await is_logged_in(page):
+        e2e_log("login", "still on login after submit — retry fill+submit once")
+        email_field, password_field = await _find_login_fields(page)
+        if email_field and password_field:
+            await _fill_login_credentials(page, email_field, password_field)
+            await _submit_login_form(page, password_field)
+
     await _wait_for_login_complete(page)
     if not await is_logged_in(page):
         where = "Render Environment" if _ON_RENDER else ".env"
@@ -373,10 +419,13 @@ async def _attempt_login(page: Page, context) -> None:
             await context.storage_state(path=str(STATE_PATH))
             return
 
-        has_login_form = _is_on_login_page(page.url or "") or await first_visible(
-            page, EMAIL_SELECTORS, timeout=3000
+        has_login_form = (
+            _is_on_login_page(page.url or "")
+            or await first_visible(page, EMAIL_SELECTORS, timeout=5000)
+            or await first_visible(page, PASSWORD_SELECTORS, timeout=3000)
         )
         if not has_login_form:
+            e2e_log("login", f"no login form at {page.url} — skip")
             continue
 
         login_attempted = True
