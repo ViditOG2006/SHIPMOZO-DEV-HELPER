@@ -77,11 +77,17 @@ from panel_e2e.docs_capture_heal import (
     verify_module_target,
 )
 from panel_e2e.page_observe import capture_page_observation
+from panel_e2e.e2e_log import e2e_log
 from shipmozo_login import HEADLESS, LOGIN_URLS
 from shipmozo_login import async_login_and_save_state
 from shipmozo_login import first_visible, is_logged_in, panel_credentials
 
 PANEL_BASE = LOGIN_URLS[0].rstrip("/")
+
+
+def capture_log(message: str) -> None:
+    e2e_log("doc-capture", message)
+
 
 _ON_RENDER = os.getenv("RENDER", "").lower() in {"true", "1", "yes"} or bool(
     os.getenv("RENDER_EXTERNAL_URL", "").strip()
@@ -139,7 +145,9 @@ def docs_capture_heal_enabled() -> bool:
 async def page_ready_for_module_shot(
     page: Page, module_name: str, description: str = ""
 ) -> bool:
-    verified, _reason = await verify_module_target(page, module_name, description)
+    verified, reason = await verify_module_target(page, module_name, description)
+    if not verified:
+        capture_log(f"verify failed: {reason} | url={page.url}")
     return verified
 
 
@@ -159,15 +167,19 @@ async def run_pre_capture_heal_loop(
     attempts = DOCS_CAPTURE_INLINE_HEAL_ATTEMPTS if docs_capture_heal_enabled() else 1
 
     for attempt in range(1, attempts + 1):
+        capture_log(f"pre-capture heal attempt {attempt}/{attempts} url={page.url}")
         await dismiss_blocking_overlays(page)
         last_obs = await build_page_state(page, module_name, description)
         if last_obs.get("moduleVerified"):
+            capture_log(f"pre-capture verified on attempt {attempt}")
             return {"ok": True, "observation": last_obs, "attempts": attempt}
 
         if not docs_capture_heal_enabled():
+            capture_log("inline heal disabled — stopping pre-capture loop")
             break
 
         healed = await heal_navigation_for_module(page, module_name, description, canonical)
+        capture_log(f"heal_navigation_for_module -> {healed} url={page.url}")
         await _pause(0.8)
         if healed:
             continue
@@ -579,21 +591,28 @@ async def save_shot(
     module_name: str = "",
     description: str = "",
 ) -> dict | None:
+    capture_log(f"save_shot {shot_id!r} step={step} url={page.url}")
     if docs_fast():
         fast_e2e = True
     if poor_screenshot_label(label):
+        capture_log(f"save_shot skip: poor label {label!r}")
         return None
     if await page_looks_like_not_found(page):
+        capture_log(f"save_shot skip: 404/not-found url={page.url}")
         return None
     if not await is_logged_in(page):
+        capture_log(f"save_shot skip: not logged in url={page.url}")
         return None
     if require_rate_calculator and not await _on_rate_calculator_page(page):
+        capture_log("save_shot skip: not on rate calculator")
         return None
     if module_name and not await page_ready_for_module_shot(page, module_name, description):
+        capture_log(f"save_shot skip: module not verified module={module_name!r}")
         return None
 
     await dismiss_blocking_overlays(page)
     if await page_has_blocking_dialog(page):
+        capture_log("save_shot rejected: blocking dialog")
         return {
             "id": shot_id,
             "label": label,
@@ -608,11 +627,13 @@ async def save_shot(
         target = out_dir / filename
         await take_page_screenshot(page, str(target), full_page=full_page)
         if module_name and not await page_ready_for_module_shot(page, module_name, description):
+            capture_log(f"save_shot post-shot verify failed — deleting {filename}")
             try:
                 target.unlink(missing_ok=True)
             except Exception:
                 pass
             return None
+        capture_log(f"save_shot ok {filename} url={page.url}")
         return {
             "id": shot_id,
             "label": label,
@@ -626,6 +647,7 @@ async def save_shot(
     if not content_ready:
         ready, state = await prepare_for_screenshot(page)
         if not ready or state.get("notFound"):
+            capture_log(f"save_shot skip: not ready state={state}")
             return None
         content_ready = True
     elif not await has_module_anchor(page):
@@ -1414,8 +1436,25 @@ async def capture_module(
     rate_calc = is_rate_calculator_target(module_name, description)
 
     try:
-        panel_credentials()  # fail fast before launching browser on Render
+        email, _pwd = panel_credentials()
+        capture_log(
+            f"start session={session_id} module={module_name!r} canonical={canonical!r} "
+            f"fast={docs_fast()} budget={DOCS_CAPTURE_BUDGET_S}s render={_ON_RENDER} email={email}"
+        )
+        capture_log("opening browser + login…")
         p, browser, context, page = await async_login_and_save_state()
+        capture_log(f"login ok url={page.url}")
+        post_login_url = (page.url or "").lower()
+        if "profile" in post_login_url or "onboarding" in post_login_url:
+            origin = await panel_origin(page)
+            target = f"{origin}/orders/new"
+            capture_log(f"post-login interstitial — goto {target}")
+            try:
+                await page.goto(target, wait_until="domcontentloaded", timeout=_nav_timeout_ms())
+                await dismiss_blocking_overlays(page)
+                capture_log(f"after interstitial skip url={page.url}")
+            except Exception as exc:
+                capture_log(f"post-login goto failed: {exc}")
         await dismiss_blocking_overlays(page)
 
         heal_plan = load_heal_plan_from_env()
@@ -1465,17 +1504,21 @@ async def capture_module(
 
         if docs_fast():
             if is_channel_target(module_name, description):
+                capture_log("capture path: channel_fast")
                 return await _capture_channel_fast(
                     page, out_dir, module_name, description, canonical
                 )
             if is_new_orders_target(module_name, description):
+                capture_log("capture path: new_orders_fast")
                 return await _capture_new_orders_fast(
                     page, out_dir, module_name, description, canonical
                 )
             if is_add_order_target(module_name, description):
+                capture_log("capture path: add_order_fast")
                 return await _capture_add_order_fast(
                     page, out_dir, module_name, description, canonical
                 )
+            capture_log("capture path: module_general_fast")
             return await _capture_module_general_fast(
                 page, out_dir, module_name, description, canonical
             )
@@ -1654,6 +1697,7 @@ async def main() -> None:
     module_name = sys.argv[2]
     description = sys.argv[3] if len(sys.argv) > 3 else ""
     out_dir = Path("output") / "cloud-images" / session_id / "raw"
+    capture_log(f"main argv session={session_id} module={module_name!r} desc_len={len(description)}")
 
     try:
         if docs_fast():
@@ -1671,6 +1715,33 @@ async def main() -> None:
             "moduleVerified"
         )
         capture_ok = bool(good_shots) or bool(videos) or (observe_only and module_verified)
+        page_state = bundle.get("pageState") or {}
+        if not capture_ok:
+            for s in shots:
+                if s.get("rejected"):
+                    capture_log(
+                        f"rejected shot id={s.get('id')} reason={s.get('rejectReason')} url={s.get('url')}"
+                    )
+            capture_log(
+                f"capture failed: good={len(good_shots)} total={len(shots)} "
+                f"verified={module_verified} url={page_state.get('url')} "
+                f"preview={(page_state.get('pageTextPreview') or '')[:120]!r}"
+            )
+        else:
+            capture_log(
+                f"capture ok: good={len(good_shots)} videos={len(videos)} "
+                f"rejected={len(shots) - len(good_shots)}"
+            )
+        err_detail = None
+        if not capture_ok:
+            verify_reason = page_state.get("verifyReason") or page_state.get("agentHints")
+            err_detail = "No module screenshots captured (404/login/wrong page)"
+            if page_state.get("onLogin"):
+                err_detail += " — still on login page"
+            elif page_state.get("is404"):
+                err_detail += " — 404/not found"
+            elif verify_reason:
+                err_detail += f" — {verify_reason}"
         print(
             json.dumps(
                 {
@@ -1682,16 +1753,15 @@ async def main() -> None:
                     "screenshots": good_shots,
                     "rejectedShots": len(shots) - len(good_shots),
                     "videos": videos,
-                    "pageState": bundle.get("pageState"),
+                    "pageState": page_state,
                     "observeOnly": observe_only,
                     "moduleVerified": module_verified,
-                    "error": None
-                    if capture_ok
-                    else "No module screenshots captured (404/login/wrong page)",
+                    "error": err_detail,
                 }
             )
         )
     except asyncio.TimeoutError:
+        capture_log(f"capture timed out after {DOCS_CAPTURE_BUDGET_S:.0f}s")
         print(
             json.dumps(
                 {
@@ -1705,6 +1775,7 @@ async def main() -> None:
         )
         sys.exit(1)
     except Exception as e:
+        capture_log(f"capture exception: {e}")
         print(json.dumps({"ok": False, "error": str(e), "screenshots": [], "videos": []}))
         sys.exit(1)
 

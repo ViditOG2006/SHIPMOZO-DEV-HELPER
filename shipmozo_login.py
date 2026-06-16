@@ -15,6 +15,7 @@ from playwright.async_api import async_playwright
 
 from panel_ui_helpers import dismiss_blocking_overlays
 from panel_url import default_panel_base, login_urls
+from panel_e2e.e2e_log import e2e_log
 
 E2E_FAST = os.getenv("E2E_FAST", "1").lower() in {"1", "true", "yes"}
 _ON_RENDER = os.getenv("RENDER", "").lower() in {"true", "1", "yes"} or bool(
@@ -224,6 +225,7 @@ async def _fill_login_credentials(page: Page, email_field, password_field) -> st
 
 
 async def _wait_for_login_complete(page: Page, *, timeout_s: int = LOGIN_WAIT_S) -> None:
+    e2e_log("login", f"waiting for login (max {timeout_s}s) url={page.url}")
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         if await is_logged_in(page):
@@ -244,6 +246,7 @@ async def _wait_for_login_complete(page: Page, *, timeout_s: int = LOGIN_WAIT_S)
 
 
 async def login(page: Page) -> None:
+    e2e_log("login", f"fill login form url={page.url}")
     await dismiss_blocking_overlays(page)
 
     email_field = await first_visible(page, EMAIL_SELECTORS, timeout=8000)
@@ -259,6 +262,7 @@ async def login(page: Page) -> None:
         raise RuntimeError("Password input not found on login page")
 
     used_email = await _fill_login_credentials(page, email_field, password_field)
+    e2e_log("login", f"submitting for {used_email}")
     await _submit_login_form(page, password_field)
     await _wait_for_login_complete(page)
     if not await is_logged_in(page):
@@ -335,13 +339,15 @@ async def _open_session(*, use_state: bool):
 
 
 async def _attempt_login(page: Page, context) -> None:
-    panel_credentials()  # fail fast if missing on Render
+    email, _pwd = panel_credentials()  # fail fast if missing on Render
+    e2e_log("login", f"attempt_login email={email} url={page.url}")
     base = default_panel_base().rstrip("/")
     nav_timeout = 45_000 if _ON_RENDER or not E2E_FAST else 15_000
     if STATE_PATH.exists():
         try:
             await page.goto(f"{base}/orders/new", wait_until="domcontentloaded", timeout=nav_timeout)
             if await is_logged_in(page):
+                e2e_log("login", f"session restored via saved state url={page.url}")
                 await context.storage_state(path=str(STATE_PATH))
                 return
         except Exception:
@@ -354,6 +360,7 @@ async def _attempt_login(page: Page, context) -> None:
     login_attempted = False
     for url in urls:
         try:
+            e2e_log("login", f"goto {url}")
             await page.goto(url, wait_until="domcontentloaded", timeout=nav_timeout)
         except Exception as exc:
             last_error = exc
@@ -362,6 +369,7 @@ async def _attempt_login(page: Page, context) -> None:
         await dismiss_blocking_overlays(page)
 
         if await is_logged_in(page):
+            e2e_log("login", f"session restored from state url={page.url}")
             await context.storage_state(path=str(STATE_PATH))
             return
 
@@ -375,9 +383,11 @@ async def _attempt_login(page: Page, context) -> None:
         try:
             await login(page)
             if await is_logged_in(page):
+                e2e_log("login", f"success url={page.url}")
                 await context.storage_state(path=str(STATE_PATH))
                 return
         except Exception as exc:
+            e2e_log("login", f"failed: {exc}")
             last_error = exc
             break
 
