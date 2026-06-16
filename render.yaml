@@ -43,7 +43,7 @@ services:
       - key: PLAYWRIGHT_MCP_AUTO_START
         value: "false"
       - key: DOCS_CAPTURE_TIMEOUT_MS
-        value: "300000"
+        value: "360000"
       - key: DOCS_SCREENSHOT_TIMEOUT_MS
         value: "45000"
       - key: DOCS_VIDEO_WALKTHROUGH_S

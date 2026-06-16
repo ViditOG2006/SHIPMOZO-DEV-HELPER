@@ -1288,9 +1288,15 @@ app.post("/api/docs/screenshots/start", async (req, res) => {
 
   const jobId = createScreenshotJob({ sessionId, moduleName });
   const captureTimeout = docsCaptureTimeoutMs(req);
+  const { resolveCaptureBudgetS } = require("./lib/doc-generation");
+  const captureBudgetS = resolveCaptureBudgetS();
   const maxAttempts = Number(process.env.DOCS_CAPTURE_MAX_ATTEMPTS || 2);
 
-  res.json({ ok: true, jobId, sessionId, captureTimeoutMs: captureTimeout });
+  console.log(
+    `[doc-capture] job ${jobId} timeout=${captureTimeout}ms budget=${captureBudgetS}s video=${process.env.DOCS_RECORD_VIDEO || "off"}`
+  );
+
+  res.json({ ok: true, jobId, sessionId, captureTimeoutMs: captureTimeout, captureBudgetS });
 
   setImmediate(async () => {
     try {
