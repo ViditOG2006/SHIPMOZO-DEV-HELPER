@@ -1,3 +1,4 @@
+(function () {
 const { useEffect, useState, useRef, useLayoutEffect } = React;
 
 const TESTING_KEY = window.DevHelperStorage?.KEYS?.TESTING || "shipmozo-testing-v1";
@@ -2402,3 +2403,6 @@ function TestingPanel({ configured, model, provider, onBusyChange, importDataset
     </div>
   );
 }
+
+window.TestingPanel = TestingPanel;
+})();

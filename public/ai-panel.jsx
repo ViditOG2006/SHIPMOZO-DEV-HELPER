@@ -1,3 +1,4 @@
+(function () {
 const { useEffect, useState, useRef, useLayoutEffect } = React;
 
 const FALLBACK_PROVIDERS = [
@@ -780,3 +781,6 @@ function AiPanel({ hideSettings = false, settingsOnly = false, onConfiguredChang
     </div>
   );
 }
+
+window.AiPanel = AiPanel;
+})();

@@ -1,3 +1,4 @@
+(function () {
 const { useEffect, useState, useRef, useLayoutEffect } = React;
 
 const fetchJson = (path, options) => window.DevHelperApi.fetchJson(path, options);
@@ -457,3 +458,6 @@ function ReportsPanel({ configured, model, provider, onGoToTesting }) {
     </div>
   );
 }
+
+window.ReportsPanel = ReportsPanel;
+})();

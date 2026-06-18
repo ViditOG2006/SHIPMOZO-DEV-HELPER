@@ -1,3 +1,4 @@
+(function () {
 const { useEffect, useState, useRef, useLayoutEffect } = React;
 
 const TABS = [
@@ -593,3 +594,6 @@ function DocsPanel({ configured, model, provider, onBusyChange, onGoToTesting })
     </div>
   );
 }
+
+window.DocsPanel = DocsPanel;
+})();
