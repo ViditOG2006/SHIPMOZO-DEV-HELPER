@@ -1302,15 +1302,24 @@
     <script src="/storage.js?v=13"></script>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Pin Babel — unpinned @babel/standalone defaults to automatic JSX runtime (import react/jsx-runtime), which breaks in-browser script injection -->
+    <script src="https://unpkg.com/@babel/standalone@7.26.9/babel.min.js"></script>
+    <script>
+      (function () {
+        if (!window.Babel?.registerPreset) return;
+        Babel.registerPreset("classic-react", {
+          presets: [[Babel.availablePresets.react, { runtime: "classic", pragma: "React.createElement", pragmaFrag: "React.Fragment" }]],
+        });
+      })();
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <script src="/mermaid-sanitize.js?v=6"></script>
     <script src="/markdown-utils.js?v=19"></script>
-    <script type="text/babel" src="/ai-panel.jsx?v=16"></script>
-    <script type="text/babel" src="/docs-panel.jsx?v=21"></script>
-    <script type="text/babel" src="/reports-panel.jsx?v=17"></script>
-    <script type="text/babel" src="/testing-panel.jsx?v=34"></script>
-    <script type="text/babel" src="/app.jsx?v=14"></script>
+    <script type="text/babel" data-presets="classic-react" src="/ai-panel.jsx?v=16"></script>
+    <script type="text/babel" data-presets="classic-react" src="/docs-panel.jsx?v=21"></script>
+    <script type="text/babel" data-presets="classic-react" src="/reports-panel.jsx?v=17"></script>
+    <script type="text/babel" data-presets="classic-react" src="/testing-panel.jsx?v=34"></script>
+    <script type="text/babel" data-presets="classic-react" src="/app.jsx?v=14"></script>
   </body>
 </html>

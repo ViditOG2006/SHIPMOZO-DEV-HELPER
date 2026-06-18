@@ -160,6 +160,7 @@ async def _leave_post_login_interstitials(page: Page) -> None:
 
 
 async def _click_login_button(page: Page) -> None:
+    click_timeout = 15_000 if _ON_RENDER else 5_000
     button_candidates = [
         page.get_by_role("button", name=re.compile(r"^log\s*in$", re.I)),
         page.get_by_role("button", name=re.compile(r"^sign\s*in$", re.I)),
@@ -176,7 +177,7 @@ async def _click_login_button(page: Page) -> None:
             if await candidate.count() > 0:
                 target = candidate.first
                 await target.wait_for(state="visible", timeout=3000)
-                await target.click(timeout=5000)
+                await target.click(timeout=click_timeout)
                 return
         except Exception:
             continue
@@ -210,16 +211,28 @@ async def _submit_login_form(page: Page, password_field) -> None:
 
 async def _fill_field(field, value: str) -> None:
     """Clear React-controlled inputs then fill."""
-    await field.click(timeout=5000)
+    timeout = 15_000 if _ON_RENDER else 5_000
     try:
-        await field.press("Control+a")
+        await field.scroll_into_view_if_needed(timeout=timeout)
     except Exception:
         pass
     try:
-        await field.fill("")
-        await field.fill(value)
+        await field.focus(timeout=timeout)
     except Exception:
-        await field.press_sequentially(value, delay=30)
+        pass
+    try:
+        await field.fill("", timeout=timeout)
+        await field.fill(value, timeout=timeout)
+    except Exception:
+        try:
+            await field.click(timeout=timeout, force=True)
+            try:
+                await field.press("Control+a")
+            except Exception:
+                pass
+            await field.press_sequentially(value, delay=30)
+        except Exception:
+            pass
     filled = (await field.input_value()).strip()
     if filled != value.strip() and value.strip():
         await field.evaluate(
@@ -262,6 +275,7 @@ async def _fill_login_credentials(page: Page, email_field, password_field) -> st
     e2e_log("login", f"filling credentials for {email}")
 
     await _fill_field(email_field, email)
+    await dismiss_blocking_overlays(page)
     await _fill_field(password_field, password)
 
     email_val = (await email_field.input_value()).strip()

@@ -615,6 +615,14 @@ function TestingPanel({ configured, model, provider, onBusyChange, importDataset
         }
       } catch (pollErr) {
         if (String(pollErr).includes("Test step failed")) throw pollErr;
+        const pollMsg = String(pollErr);
+        if (
+          pollMsg.includes("not found") ||
+          pollMsg.includes("Test step job not found") ||
+          pollMsg.includes("Request failed (404)")
+        ) {
+          throw new Error("Server restarted — re-run tests");
+        }
         networkFails += 1;
         if (networkFails > 24) throw pollErr;
         appendLog(`  … reconnecting (${networkFails})`);
