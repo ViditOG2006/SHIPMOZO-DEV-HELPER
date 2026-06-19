@@ -75,7 +75,7 @@ function isOrderE2eScenario(s) {
   return flow.startsWith("order_create");
 }
 
-/** Only Rate Calculator flows use Playwright batch + MCP nav heal. */
+/** Rate Calculator flows may use MCP nav heal during batch. */
 function isRateCalculatorE2eScenario(s) {
   const flow = String(s.inputs?.e2eFlow || s.inputs?.uiAction || "");
   return flow.startsWith("rate_calculator");
@@ -85,11 +85,15 @@ function scriptHealLabel(aiScope) {
   return aiScope?.backends?.scriptDebug === "mcp" ? "Playwright MCP" : "OpenRouter";
 }
 
+function panelE2eFlow(scenario) {
+  return String(scenario?.inputs?.e2eFlow || scenario?.inputs?.uiAction || "").trim();
+}
+
 function isPanelE2eScenario(scenario) {
-  return (
-    scenario?.category === "e2e" &&
-    Boolean(scenario.inputs?.e2eFlow || scenario.inputs?.uiAction)
-  );
+  const flow = panelE2eFlow(scenario);
+  if (!flow) return false;
+  if (scenario?.category === "e2e") return true;
+  return /^(order_|rate_calculator)/.test(flow);
 }
 
 function isPanelUiScenario(scenario) {
@@ -555,7 +559,7 @@ function TestingPanel({ configured, model, provider, onBusyChange, importDataset
     }
   };
 
-  const runSingleScenario = async (scenario, runId, index, total) => {
+  const runSingleScenario = async (scenario, runId, index, total, hooks = {}) => {
     setCurrentScenario(scenario);
     setRunProgress(`${index} / ${total}: ${scenario.id}`);
     appendLog(`▶ ${scenario.id} — ${scenario.title}`);
@@ -622,7 +626,14 @@ function TestingPanel({ configured, model, provider, onBusyChange, importDataset
           pollMsg.includes("Test step job not found") ||
           pollMsg.includes("Request failed (404)")
         ) {
-          throw new Error("Server restarted — re-run tests");
+          const err = new Error("Server restarted — re-run tests");
+          err.serverRestarted = true;
+          err.scenario = scenario;
+          if (hooks.onServerRestart) {
+            await hooks.onServerRestart(scenario);
+            err.partialSaved = true;
+          }
+          throw err;
         }
         networkFails += 1;
         if (networkFails > 24) throw pollErr;
@@ -749,6 +760,7 @@ function TestingPanel({ configured, model, provider, onBusyChange, importDataset
     }
     const groups = groupScenariosForRun(scenarios, { apiFirst: runTarget === "both" || runTarget === "backend" });
     const hasE2eBatch = groups.some((g) => g.type === "e2e_batch");
+    const useE2eBatch = hasE2eBatch && uiEvidenceEnabled;
     const runId = `${dataset.id}_run_${Date.now()}`;
     const startedAt = new Date().toISOString();
     const results = [];
@@ -799,8 +811,26 @@ function TestingPanel({ configured, model, provider, onBusyChange, importDataset
     };
 
     try {
-      const needBatch = hasE2eBatch && !skipLive;
+      const needBatch = useE2eBatch;
       await assertTestingApiReady(needBatch ? ["e2e-batch", "run-step"] : ["run-step"]);
+
+      const handleStepServerRestart = async (scenario) => {
+        if (!results.some((r) => r.scenarioId === scenario.id)) {
+          results.push({
+            scenarioId: scenario.id,
+            title: scenario.title,
+            category: scenario.category,
+            status: "failed",
+            error: "Server restarted during step",
+            durationMs: 0,
+          });
+          setLiveResults([...results]);
+        }
+        await savePartialRun(
+          results,
+          `Server restarted during ${scenario.id} — partial results saved`
+        );
+      };
 
       if (pairedUiAdded) {
         appendLog(`▶ ${pairedUiAdded} paired UI test(s) — ${runTarget === "both" ? "API first, then Playwright" : "Playwright UI"}`);
@@ -809,6 +839,20 @@ function TestingPanel({ configured, model, provider, onBusyChange, importDataset
       for (const group of groups) {
         if (shouldStopRun()) break;
         if (group.type === "e2e_batch") {
+          if (!useE2eBatch) {
+            for (const scenario of group.scenarios) {
+              stepIndex += 1;
+              results.push({
+                scenarioId: scenario.id,
+                title: scenario.title,
+                status: "skipped",
+                reason: "E2E batch requires Frontend or Both run target",
+                durationMs: 0,
+              });
+              setLiveResults([...results]);
+            }
+            continue;
+          }
           const batchScenarios = group.scenarios;
           appendLog(
             `▶ E2E session (${batchScenarios.length} tests, one login) — live ${scriptHealLabel(aiScope)} + Playwright logs below`
@@ -929,8 +973,15 @@ function TestingPanel({ configured, model, provider, onBusyChange, importDataset
         }
 
         const scenario = group.scenario;
+        if (isPanelE2eScenario(scenario)) {
+          throw new Error(
+            `${scenario.id}: E2E scenario must run in batch session — check grouping`
+          );
+        }
         stepIndex += 1;
-        const result = await runSingleScenario(scenario, runId, stepIndex, scenarios.length);
+        const result = await runSingleScenario(scenario, runId, stepIndex, scenarios.length, {
+          onServerRestart: handleStepServerRestart,
+        });
         results.push(result);
         setLiveResults([...results]);
         logScenarioResult(scenario, result);
@@ -977,7 +1028,20 @@ function TestingPanel({ configured, model, provider, onBusyChange, importDataset
         setMessage(String(err));
         setMessageType("err");
         appendLog(`ERROR: ${err}`);
-        if (results.length) await savePartialRun(results, `Error — partial results saved (${results.length} steps)`);
+        if (err.serverRestarted && err.scenario && !results.some((r) => r.scenarioId === err.scenario.id)) {
+          results.push({
+            scenarioId: err.scenario.id,
+            title: err.scenario.title,
+            category: err.scenario.category,
+            status: "failed",
+            error: "Server restarted during step",
+            durationMs: 0,
+          });
+          setLiveResults([...results]);
+        }
+        if (results.length && !err.partialSaved) {
+          await savePartialRun(results, `Error — partial results saved (${results.length} steps)`);
+        }
       }
     } finally {
       runControlRef.current = { runId: null, stop: false };
@@ -2004,10 +2068,7 @@ function TestingPanel({ configured, model, provider, onBusyChange, importDataset
                   id: "both",
                   label: datasetBackendOnly
                     ? `Both (${countApiScenarios(dataset.scenarios)})`
-                    : `Both (${
-                        countApiScenarios(dataset.scenarios) +
-                        effectiveUiCount(dataset.scenarios, dataset.postman?.selectedFolders)
-                      })`,
+                    : `Both (${filterScenariosForRunTarget(dataset.scenarios, "both", datasetBackendOnly).length} runnable)`,
                 },
               ].map((opt) => (
                 <label key={opt.id} className="checkbox-row" style={{ marginRight: 8 }}>
@@ -2126,9 +2187,9 @@ function TestingPanel({ configured, model, provider, onBusyChange, importDataset
               >
                 Results
                 {runForCurrentDataset
-                  ? ` (${runForCurrentDataset.summary.passed}/${runForCurrentDataset.summary.total})`
+                  ? ` (${runForCurrentDataset.summary.passed} passed · ${runForCurrentDataset.summary.total} total)`
                   : liveForCurrentDataset.length
-                    ? ` (${liveForCurrentDataset.length})`
+                    ? ` (${liveForCurrentDataset.filter((r) => r.status === "passed").length} passed · ${liveForCurrentDataset.length} total)`
                     : ""}
               </button>
             </div>

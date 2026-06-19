@@ -9,17 +9,27 @@ from pathlib import Path
 
 from capture_module_screenshots import save_shot
 from panel_e2e.nav_fast import fast_nav_to_rate_calculator
-from panel_e2e.orders import run_order_create_flow
+from panel_e2e.orders import run_order_create_flow, run_order_verify_flow
 from panel_e2e.rate_calculator import run_rate_calculator_flow
 from shipmozo_login import async_login_and_save_state
+
+ORDER_VERIFY_FLOWS = {"order_verify", "order_verify_new_orders", "orders_verify"}
+
 
 async def _order_create(page, flow, form, **kwargs):
     return await run_order_create_flow(page, form, scenario_id=kwargs.get("scenario_id", ""))
 
 
+async def _order_verify(page, flow, form, **kwargs):
+    return await run_order_verify_flow(page, form, scenario_id=kwargs.get("scenario_id", ""))
+
+
 FLOWS = {
     "order_create_domestic": _order_create,
     "order_create": _order_create,
+    "order_verify_new_orders": _order_verify,
+    "order_verify": _order_verify,
+    "orders_verify": _order_verify,
     "rate_calculator_open": run_rate_calculator_flow,
     "rate_calculator_domestic_happy": run_rate_calculator_flow,
     "rate_calculator_domestic_calculate": run_rate_calculator_flow,
@@ -55,7 +65,7 @@ async def run_e2e(scenario: dict, run_id: str) -> dict:
         if flow.startswith("rate_calculator"):
             heal, nav_ok = await fast_nav_to_rate_calculator(page)
             nav_script = heal.get("script") if nav_ok else None
-        if flow.startswith("order_create"):
+        if flow.startswith("order_create") or flow in ORDER_VERIFY_FLOWS:
             result = await runner(page, flow, form, scenario_id=scenario_id)
         else:
             result = await runner(
