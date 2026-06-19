@@ -220,18 +220,21 @@ function DocsPanel({ configured, model, provider, onBusyChange, onGoToTesting })
     try {
       const totalSteps = backendOnly ? 2 : 3;
       setStep(`Step 1/${totalSteps}: Generating ${backendOnly ? "API" : "technical"} PRD…`);
-      const prdData = await window.DevHelperApi.fetchJson("/api/docs/generate-step", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        timeoutMs: DOCS_LLM_STEP_TIMEOUT_MS,
-        body: JSON.stringify({
+      const prdData = await window.DevHelperApi.startAndPollDocStep(
+        {
           moduleName: name,
           description: description.trim(),
           captureScreens: backendOnly ? false : captureScreens,
           backendOnly,
           step: "prd",
-        }),
-      });
+        },
+        {
+          maxWaitMs: DOCS_LLM_STEP_TIMEOUT_MS,
+          onProgress: (_status, sec) => {
+            setStep(`Step 1/${totalSteps}: Generating ${backendOnly ? "API" : "technical"} PRD… (${sec}s)`);
+          },
+        }
+      );
 
       const sid = prdData.sessionId || "";
       setSessionId(sid);
@@ -306,11 +309,8 @@ function DocsPanel({ configured, model, provider, onBusyChange, onGoToTesting })
           ? `Step 2/${totalSteps}: Writing API integration guide…`
           : `Step 3/${totalSteps}: Writing user manual (Azure OpenAI)…`
       );
-      const manualData = await window.DevHelperApi.fetchJson("/api/docs/generate-step", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        timeoutMs: DOCS_LLM_STEP_TIMEOUT_MS,
-        body: JSON.stringify({
+      const manualData = await window.DevHelperApi.startAndPollDocStep(
+        {
           moduleName: name,
           description: description.trim(),
           captureScreens: false,
@@ -320,8 +320,18 @@ function DocsPanel({ configured, model, provider, onBusyChange, onGoToTesting })
           prd: prdData.prd || "",
           screenshots: shots,
           videos: vids,
-        }),
-      });
+        },
+        {
+          maxWaitMs: DOCS_LLM_STEP_TIMEOUT_MS,
+          onProgress: (_status, sec) => {
+            setStep(
+              backendOnly
+                ? `Step 2/${totalSteps}: Writing API integration guide… (${sec}s)`
+                : `Step 3/${totalSteps}: Writing user manual (Azure OpenAI)… (${sec}s)`
+            );
+          },
+        }
+      );
 
       setUserManual(manualData.user_manual || "");
 

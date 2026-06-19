@@ -85,6 +85,46 @@
     }
   }
 
+  async function startAndPollDocStep(body, { onProgress, maxWaitMs = 900000 } = {}) {
+    const start = await fetchJson("/api/docs/generate-step/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      timeoutMs: 60000,
+      body: JSON.stringify(body),
+    });
+    const jobId = start.jobId;
+    const pollMs = 2500;
+    const pollTimeoutMs = 60000;
+    const pollStarted = Date.now();
+    let lastStatus = null;
+    let networkFails = 0;
+    while (Date.now() - pollStarted < maxWaitMs) {
+      await new Promise((r) => setTimeout(r, pollMs));
+      try {
+        lastStatus = await fetchJson(`/api/docs/generate-step/status/${jobId}`, {
+          timeoutMs: pollTimeoutMs,
+        });
+        networkFails = 0;
+        if (onProgress) {
+          onProgress(lastStatus, Math.floor((Date.now() - pollStarted) / 1000));
+        }
+        if (lastStatus.status === "done" || lastStatus.status === "error") break;
+      } catch (pollErr) {
+        networkFails += 1;
+        if (networkFails > 20) throw pollErr;
+      }
+    }
+    if (!lastStatus || lastStatus.status === "running") {
+      throw new Error(
+        `Doc generation timed out after ${Math.round(maxWaitMs / 60000)} minutes`
+      );
+    }
+    if (lastStatus.status === "error") {
+      throw new Error(lastStatus.error || "Doc generation failed");
+    }
+    return lastStatus;
+  }
+
   async function startAndPollTestcaseGen(body, { onProgress, maxWaitMs = 600000 } = {}) {
     const start = await fetchJson("/api/testing/generate-from-docs/start", {
       method: "POST",
@@ -130,6 +170,7 @@
     apiUrl,
     fetchJson,
     checkServer,
+    startAndPollDocStep,
     startAndPollTestcaseGen,
     expectedAppUrl,
     API_PORT,
