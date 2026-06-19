@@ -28,6 +28,11 @@ const {
   updateTestcaseGenJob,
   getTestcaseGenJob,
 } = require("./lib/testcase-gen-job-store");
+const {
+  createDocStepJob,
+  updateDocStepJob,
+  getDocStepJob,
+} = require("./lib/doc-step-job-store");
 const { storeScreenshotBatch, storeVideoBatch, CLOUD_ROOT } = require("./lib/image-storage");
 const { saveReport, listReports, getReport, deleteReport, warmupReportArchive, cloudReportsEnabled } = require("./lib/report-archive");
 const {
@@ -1360,39 +1365,107 @@ app.get("/api/docs/screenshots/status/:jobId", (req, res) => {
   });
 });
 
-app.post("/api/docs/generate-step", async (req, res) => {
-  const step = String(req.body?.step || "").trim();
-  const moduleName = String(req.body?.moduleName || req.body?.appName || "").trim();
-  const sessionId = String(req.body?.sessionId || nowSessionId()).trim();
+function parseDocStepRequest(body) {
+  const step = String(body?.step || "").trim();
+  const moduleName = String(body?.moduleName || body?.appName || "").trim();
+  const sessionId = String(body?.sessionId || nowSessionId()).trim();
+  return {
+    step,
+    moduleName,
+    sessionId,
+    description: String(body?.description || "").trim(),
+    prd: String(body?.prd || "").trim(),
+    screenshots: Array.isArray(body?.screenshots) ? body.screenshots : [],
+    videos: Array.isArray(body?.videos) ? body.videos : [],
+    model: body?.model,
+    provider: body?.provider,
+    captureScreens: body?.captureScreens !== false,
+    backendOnly: body?.backendOnly === true,
+  };
+}
 
-  if (!step) {
-    res.status(400).json({ error: "step is required (prd | screenshots | manual)" });
+function validateDocStepRequest({ step, moduleName }) {
+  if (!step) return "step is required (prd | screenshots | manual)";
+  if (!moduleName) return "moduleName is required";
+  if (!getConfigStatus().configured) return "AI API key is not configured";
+  return null;
+}
+
+app.post("/api/docs/generate-step/start", async (req, res) => {
+  const parsed = parseDocStepRequest(req.body);
+  const validationError = validateDocStepRequest(parsed);
+  if (validationError) {
+    res.status(400).json({ error: validationError });
     return;
   }
-  if (!moduleName) {
-    res.status(400).json({ error: "moduleName is required" });
+
+  const jobId = createDocStepJob({
+    step: parsed.step,
+    sessionId: parsed.sessionId,
+    moduleName: parsed.moduleName,
+  });
+
+  res.json({
+    ok: true,
+    jobId,
+    status: "running",
+    step: parsed.step,
+    sessionId: parsed.sessionId,
+    moduleName: parsed.moduleName,
+  });
+
+  setImmediate(async () => {
+    try {
+      const result = await generateModulePackageStep(parsed);
+      updateDocStepJob(jobId, { status: "done", result });
+    } catch (err) {
+      updateDocStepJob(jobId, { status: "error", error: err.message || String(err) });
+    }
+  });
+});
+
+app.get("/api/docs/generate-step/status/:jobId", (req, res) => {
+  const job = getDocStepJob(String(req.params.jobId || "").trim());
+  if (!job) {
+    res.status(404).json({ error: "Doc generation job not found" });
     return;
   }
-  if (!getConfigStatus().configured) {
-    res.status(400).json({ error: "AI API key is not configured" });
+
+  const elapsedSeconds = Math.floor(((job.finishedAt || Date.now()) - job.startedAt) / 1000);
+  const base = {
+    ok: job.status === "done",
+    jobId: job.id,
+    status: job.status,
+    step: job.step,
+    sessionId: job.sessionId,
+    moduleName: job.moduleName,
+    elapsedSeconds,
+  };
+
+  if (job.status === "error") {
+    res.json({ ...base, ok: false, error: job.error || "Doc generation failed" });
+    return;
+  }
+
+  if (job.status === "done" && job.result) {
+    res.json({ ...base, ...job.result });
+    return;
+  }
+
+  res.json(base);
+});
+
+app.post("/api/docs/generate-step", async (req, res) => {
+  const parsed = parseDocStepRequest(req.body);
+  const validationError = validateDocStepRequest(parsed);
+  if (validationError) {
+    res.status(400).json({ error: validationError });
     return;
   }
 
   try {
-    const result = await generateModulePackageStep({
-      step,
-      sessionId,
-      moduleName,
-      description: String(req.body?.description || "").trim(),
-      prd: String(req.body?.prd || "").trim(),
-      screenshots: Array.isArray(req.body?.screenshots) ? req.body.screenshots : [],
-      videos: Array.isArray(req.body?.videos) ? req.body.videos : [],
-      model: req.body?.model,
-      provider: req.body?.provider,
-      captureScreens: req.body?.captureScreens !== false,
-      backendOnly: req.body?.backendOnly === true,
-    });
-    res.json({ ok: true, moduleName, ...result });
+    const result = await generateModulePackageStep(parsed);
+    res.json({ ok: true, moduleName: parsed.moduleName, ...result });
   } catch (err) {
     res.status(err.code === "NO_API_KEY" ? 400 : 502).json({ error: err.message });
   }
